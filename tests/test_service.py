@@ -317,3 +317,16 @@ def test_red_flag_keywords_work_without_llm():
     assert has_red_flag("some pressure in my chest")
     assert has_red_flag("felt odd", {"symptoms": ["near_fainting"], "red_flags": {}})
     assert not has_red_flag("fluttering after lunch")
+
+
+def test_poll_logs_episodes_to_obsidian_vault(svc, tmp_path):
+    service, profile, _, _ = svc
+    service.config.vault_dir = str(tmp_path / "vault")
+    service.poll(profile)
+    note = tmp_path / "vault" / "Episodes" / f"{DAY.isoformat()}.md"
+    text = note.read_text(encoding="utf-8")
+    assert "| Time | Duration | Peak HR |" in text and "at rest" in text
+    home = (tmp_path / "vault" / "Home.md").read_text(encoding="utf-8")
+    assert f"[[{DAY.isoformat()}]]" in home
+    service.poll(profile)  # re-run rewrites, never duplicates
+    assert note.read_text(encoding="utf-8").count("| at rest |") == text.count("| at rest |")

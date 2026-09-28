@@ -14,7 +14,7 @@ from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 
-from . import analysis, charts, messages, report
+from . import analysis, charts, messages, report, vault
 from .alerts import evaluate_alerts
 from .config import AppConfig, ProfileConfig
 from .garmin_client import GarminAuthRequired, GarminSession, GarminUnavailable
@@ -201,7 +201,20 @@ class MonitorService:
                 to_notify.append(stored)
         # attach numbers to symptom reports logged before the data arrived
         self._enrich_symptoms(profile, snap)
+        if found:
+            self._log_to_vault(profile, snap.day)
         return new, to_notify
+
+    def _log_to_vault(self, profile: ProfileConfig, day: date) -> None:
+        """Rewrite the Obsidian note for ``day`` (no-op without ``vault_dir``); never breaks monitoring."""
+        if not self.config.vault_dir:
+            return
+        start, end = self.day_range_utc(profile, day, day)
+        try:
+            vault.write_day(self.config.vault_dir, profile.name, day, self.storage.get_episodes(profile.name, start, end),
+                            profile.timezone or self.config.timezone, self.today(profile))
+        except OSError as exc:
+            logger.warning("%s: vault write failed: %s", profile.name, exc)
 
     def _enrich_symptoms(self, profile: ProfileConfig, snap: DaySnapshot) -> None:
         start, end = local_day_bounds(snap.day, profile.timezone)
@@ -237,6 +250,7 @@ class MonitorService:
         self.storage.update_episode_assessment(ep.id, result.assessment, result.confidence, result.reasoning, result.doctor_note, result.model)
         ep.llm_assessment, ep.llm_confidence = result.assessment, result.confidence
         ep.llm_reasoning, ep.doctor_note, ep.llm_model = result.reasoning, result.doctor_note, result.model
+        self._log_to_vault(profile, to_local(ep.start, profile.timezone).date())
         return result
 
     def assess_pending(self, profile: ProfileConfig, limit: int = 10) -> int:
