@@ -53,6 +53,10 @@ class FakeLLM:
     def chat_json(self, system, user, schema):
         self.calls.append(("json", user))
         props = schema.get("properties", {})
+        if "red_flags" in props:
+            chest = "chest" in user
+            return {"event_type": "palpitation", "duration_minutes": 3, "symptoms": ["racing", "made_up"],
+                    "possible_triggers": ["caffeine"], "red_flags": {"chest_pain": chest, "fainting": False, "severe_breathlessness": False}}
         if "assessment" in props:
             return {"assessment": "possible_palpitation", "confidence": 0.7, "reasoning": "At rest with abrupt onset.", "doctor_note": "Episode at rest."}
         return {"summary": "Decent day.", "do_more": ["walk"], "do_less": ["sit"], "watch_outs": ["resting HR"], "heart_note": ""}
@@ -288,3 +292,23 @@ async def test_scheduler_poll_error_notifies_admins_once(svc):
     await sched.deliver(profile, res)
     assert bot.send_text.await_count == 1
     assert bot.send_text.await_args.args[0] == service.config.telegram.admin_chat_ids
+
+
+def test_log_symptom_extracts_fields_and_flags_red_flags(svc):
+    service, profile, _, _ = svc
+    msg = service.log_symptom(profile, local(DAY, 11, 0), "heart racing after coffee, about 3 minutes", chat_id=111)
+    assert "995" not in msg and "racing" in msg
+    msg2 = service.log_symptom(profile, local(DAY, 12, 0), "some chest pain now", chat_id=111)
+    assert "995" in msg2
+    s, e = service.day_range_utc(profile, DAY, DAY)
+    reps = service.storage.get_symptoms(profile.name, s, e)
+    assert reps[0].extracted["symptoms"] == ["racing"]  # off-vocabulary value dropped
+    assert reps[0].extracted["possible_triggers"] == ["caffeine"]
+    assert reps[0].note == "heart racing after coffee, about 3 minutes"  # raw text kept
+
+
+def test_red_flag_keywords_work_without_llm():
+    from garmin_health_monitor.analysis import has_red_flag
+    assert has_red_flag("I nearly fainted")
+    assert has_red_flag("chest tightness and pain")
+    assert not has_red_flag("fluttering after lunch")

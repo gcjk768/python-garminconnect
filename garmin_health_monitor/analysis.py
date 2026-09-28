@@ -116,6 +116,44 @@ EPISODE_SCHEMA: dict[str, Any] = {
     "required": ["assessment", "confidence", "reasoning", "doctor_note"],
 }
 
+SYMPTOM_WORDS = (
+    "racing", "skipped_beats", "fluttering", "pounding", "dizziness", "chest_pain",
+    "chest_tightness", "breathlessness", "sweating", "nausea", "fainting", "near_fainting", "anxiety",
+)
+TRIGGER_WORDS = (
+    "caffeine", "alcohol", "poor_sleep", "stress", "exercise", "large_meal", "standing_up",
+    "lying_down", "missed_medication", "heat", "unknown",
+)
+RED_FLAG_KEYS = ("chest_pain", "fainting", "severe_breathlessness")
+
+# Structured fields pulled out of a free-text /palp or /note message.
+EXTRACT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "event_type": {"type": "string", "enum": ["palpitation", "activity", "other"]},
+        "duration_minutes": {"type": ["number", "null"]},
+        "still_ongoing": {"type": ["boolean", "null"]},
+        "activity_before": {"type": ["string", "null"]},
+        "symptoms": {"type": "array", "items": {"type": "string", "enum": list(SYMPTOM_WORDS)}},
+        "severity_self_reported": {"type": ["integer", "null"], "minimum": 1, "maximum": 5},
+        "heart_rate_bpm": {"type": ["number", "null"]},
+        "possible_triggers": {"type": "array", "items": {"type": "string", "enum": list(TRIGGER_WORDS)}},
+        "red_flags": {
+            "type": "object",
+            "properties": {k: {"type": "boolean"} for k in RED_FLAG_KEYS},
+            "required": list(RED_FLAG_KEYS),
+        },
+    },
+    "required": ["event_type", "symptoms", "possible_triggers", "red_flags"],
+}
+
+# Hard-coded red-flag check: works with no LLM and cannot be talked out of it.
+_RED_FLAG_RE = re.compile(
+    r"chest\s*(pain|hurt|tight|pressure)|faint|passed\s*out|black(ed)?\s*out|collaps|"
+    r"can'?t\s*breathe|cannot\s*breathe|short(ness)?\s*of\s*breath|breathless",
+    re.IGNORECASE,
+)
+
 # ---------------------------------------------------------------------------
 # Small helpers
 # ---------------------------------------------------------------------------
@@ -605,6 +643,7 @@ def _persona_lines(profile: ProfileConfig) -> str:
     if profile.goals:
         lines.append(f"Their goals: {profile.goals}.")
     lines.append(f"Language for the answer: {profile.language or 'English'}.")
+    lines.append("Never use dashes in any text you write. Short plain sentences a 65 year old can read.")
     return "\n".join(lines)
 
 
@@ -660,8 +699,46 @@ def _narrative_system(profile: ProfileConfig) -> str:
         "how long, how high the heart rate went versus baseline, how many were felt by the person, "
         "and how many were reported without a detected episode. Mention that the watch is an "
         "optical wrist sensor sampled every 2 minutes and shows rate, not rhythm. No diagnosis, no "
-        "treatment suggestions, no speculation. Plain prose, no lists, no headings."
+        "treatment suggestions, no speculation. The statistics were computed by software and are "
+        "correct: present them, do not interpret or recount them. Name any red flag reports "
+        "(chest pain, fainting, severe breathlessness) with their dates. End with one line inviting "
+        "the doctor to see the full log. Under 250 words. Plain prose, no lists, no headings."
     )
+
+
+def _extract_system() -> str:
+    return (
+        "You are the language layer for a private family health log. You are not a doctor. "
+        "Never diagnose, never suggest causes, treatment, medication or supplements.\n"
+        "Convert ONE logged message into the structured fields of the schema. Answer from the "
+        "message alone; do not use tools.\n"
+        "- If a value is not stated, use null. Never guess a time, duration or heart rate.\n"
+        "- Only use numbers that appear in the message.\n"
+        f"- symptoms only from: {', '.join(SYMPTOM_WORDS)}.\n"
+        f"- possible_triggers only from: {', '.join(TRIGGER_WORDS)}.\n"
+        "- Set a red_flags value to true only when the message clearly states it. Do not judge "
+        "whether the episode is serious, just record what was said."
+    )
+
+
+def extract_symptom(client: Any, note: str, logged_at: datetime, tz: str) -> dict[str, Any]:
+    """Structured fields from a free-text symptom note (raises LLMError on failure)."""
+    user = f"logged_at: {_local_str(logged_at, tz, '%Y-%m-%d %H:%M')}\nmessage: {note}"
+    data = client.chat_json(_extract_system(), user, EXTRACT_SCHEMA)
+    data = data if isinstance(data, dict) else {}
+    # the schema enforces the shape, but a non-enforcing backend (Ollama) may not
+    data["symptoms"] = [s for s in data.get("symptoms") or [] if s in SYMPTOM_WORDS]
+    data["possible_triggers"] = [t for t in data.get("possible_triggers") or [] if t in TRIGGER_WORDS]
+    flags = data.get("red_flags") if isinstance(data.get("red_flags"), dict) else {}
+    data["red_flags"] = {k: flags.get(k) is True for k in RED_FLAG_KEYS}
+    return data
+
+
+def has_red_flag(note: str, extracted: dict[str, Any] | None = None) -> bool:
+    """True if the note or the extracted fields mention chest pain, fainting or bad breathlessness."""
+    if note and _RED_FLAG_RE.search(note):
+        return True
+    return any((extracted or {}).get("red_flags", {}).values())
 
 
 # ---------------------------------------------------------------------------
@@ -791,7 +868,10 @@ def weekly_review(
         f"{_dumps(payload)}\n"
         "Write a weekly review: what went well, what slipped compared with the previous week, "
         "2-4 do_more items and 2-4 do_less items for next week, watch_outs, and a heart_note "
-        "about the at-rest heart-rate episodes (count and timing only, no diagnosis)."
+        "about the at-rest heart-rate episodes (count and timing only, no diagnosis). "
+        "Only call something a pattern when it shows up on at least 3 days, and quote the count, "
+        "for example 'under 6000 steps on 4 of 7 days'. Never invent a suggestion the data does not "
+        "support. If fewer than 5 days have data, say so in the summary."
     )
     data = client.chat_json(_coaching_system(profile, "weekly"), user, COACHING_SCHEMA)
     return coaching_from_dict(data, model=getattr(client, "model", "ollama"), period="weekly")

@@ -294,6 +294,8 @@ class SymptomReport:
     episode_id: int | None = None
     chat_id: int | None = None
     source: str = "command"  # command | button
+    extracted: dict | None = None  # structured fields from analysis.extract_symptom
+    red_flag: bool = False
     id: int | None = None
 
 

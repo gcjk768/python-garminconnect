@@ -480,6 +480,12 @@ class MonitorService:
         if ep and ep.id is not None:
             rep.episode_id = ep.id
             self.storage.set_episode_felt(ep.id, True, note=note.strip() or None)
+        if self.llm is not None and rep.note:
+            try:
+                rep.extracted = analysis.extract_symptom(self.llm, rep.note, event_time, profile.timezone or self.config.timezone)
+            except LLMError as exc:
+                logger.warning("%s: symptom extraction via %s failed: %s", profile.name, describe_backend(self.llm), exc)
+        rep.red_flag = analysis.has_red_flag(rep.note, rep.extracted)
         self.storage.add_symptom(rep)
         return messages.symptom_logged(profile, rep)
 

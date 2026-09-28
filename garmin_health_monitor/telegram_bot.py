@@ -863,6 +863,14 @@ class HealthBot:
         )
         if text is not None:
             await self._reply(ctx.message, str(text) or "Recorded.")
+            # copy to the family (profile chats + admins) so a log from Dad's chat reaches you too
+            others = [
+                c
+                for c in dict.fromkeys([*ctx.profile.telegram_chat_ids, *self.config.telegram.admin_chat_ids])
+                if c != ctx.chat_id
+            ]
+            if others:
+                await self.send_text(others, str(text), profile=ctx.profile)
 
     async def cmd_palp(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         ctx = await self._begin(update, context)

@@ -112,7 +112,8 @@ CREATE TABLE IF NOT EXISTS symptoms (
     baseline_hr REAL,
     episode_id INTEGER,
     chat_id INTEGER,
-    source TEXT DEFAULT 'command'
+    source TEXT DEFAULT 'command',
+    extracted TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_symptoms_profile_time ON symptoms(profile, event_time);
 
@@ -178,6 +179,10 @@ class Storage:
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA foreign_keys=ON")
             self._conn.executescript(SCHEMA)
+            try:  # databases created before the extracted column existed
+                self._conn.execute("ALTER TABLE symptoms ADD COLUMN extracted TEXT")
+            except sqlite3.OperationalError:
+                pass
 
     # -- low level -------------------------------------------------------
 
@@ -596,7 +601,7 @@ class Storage:
         with self.tx() as c:
             cur = c.execute(
                 "INSERT INTO symptoms(profile, reported_at, event_time, note, hr_at_time, baseline_hr, "
-                "episode_id, chat_id, source) VALUES (?,?,?,?,?,?,?,?,?)",
+                "episode_id, chat_id, source, extracted) VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (
                     rep.profile,
                     _iso(rep.reported_at),
@@ -607,6 +612,7 @@ class Storage:
                     rep.episode_id,
                     rep.chat_id,
                     rep.source,
+                    json.dumps(rep.extracted) if rep.extracted else None,
                 ),
             )
             rep.id = cur.lastrowid
@@ -632,6 +638,7 @@ class Storage:
                     episode_id=r["episode_id"],
                     chat_id=r["chat_id"],
                     source=r["source"] or "command",
+                    extracted=json.loads(r["extracted"]) if r["extracted"] else None,
                 )
             )
         return out

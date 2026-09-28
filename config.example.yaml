@@ -27,7 +27,8 @@ llm:
     max_turns: 3                        # keep >= 2: structured output arrives via a tool call
     effort: low                         # low | medium | high; low is plenty for summaries
     # max_budget_usd: 0.05              # per-call ceiling (API-key users only)
-    # bare: false                       # true only with ANTHROPIC_API_KEY (skips hooks/settings)
+    # bare: true                        # recommended on the NAS: skips hooks/plugins/MCP/CLAUDE.md;
+                                        # needs ANTHROPIC_API_KEY (Console key), not a subscription login
     # extra_args: []                    # any other `claude` flags
 
 # Only used when llm.backend is "ollama".
@@ -78,10 +79,13 @@ profiles:
       password: ${DAD_GARMIN_PASSWORD}
       tokenstore: /data/tokens/dad
       is_cn: false
-    # Where Dad's messages go: your chat, a family group topic, Dad's own chat...
+    # Dad's own chat AND yours: alerts, reports and every symptom he logs go to both.
+    # (Admins also get a copy of anything Dad logs from his chat.)
     telegram_chat_ids:
+      - ${DAD_TELEGRAM_CHAT_ID:-}        # empty = only your chat until Dad has one
       - ${TELEGRAM_ADMIN_CHAT_ID}
       # - "-1002069000031:2665"
+    language: English
     timezone: Asia/Singapore
     persona: "68-year-old man, retired, reports occasional heart palpitations, otherwise active"
     goals: "walk at least 6000 steps a day, sleep 7 hours, keep stress low"

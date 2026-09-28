@@ -1114,10 +1114,17 @@ def episodes_list(
     return _assemble(parts)
 
 
+RED_FLAG_TEXT = (
+    "🚨 <b>Chest pain, fainting or severe breathlessness: call 995 now.</b> "
+    "Do not wait for this bot or the doctor report."
+)
+
+
 def symptom_logged(profile: ProfileConfig, rep: SymptomReport) -> str:
     """📝 Confirmation after ``/palp`` / ``/note`` with the heart rate near that time."""
     tz = _tz(profile)
     parts: list[str | None] = [
+        RED_FLAG_TEXT if rep.red_flag else None,
         f"📝 <b>Symptom logged — {_name(profile)}</b>",
         f"🕒 {_day_label(rep.event_time, tz)} {_hm(rep.event_time, tz)}",
     ]
@@ -1131,6 +1138,13 @@ def symptom_logged(profile: ProfileConfig, rep: SymptomReport) -> str:
         parts.append("❤️ Heart rate near that time: n/a (no reading within a few minutes — it may appear after the next sync)")
     if rep.episode_id is not None:
         parts.append(f"🔗 Linked to detected episode #{_n(rep.episode_id)}")
+    ex = rep.extracted or {}
+    if ex.get("symptoms"):
+        parts.append("Symptoms: " + esc(", ".join(s.replace("_", " ") for s in ex["symptoms"])))
+    if ex.get("duration_minutes") is not None:
+        parts.append(f"Duration: {_n(ex['duration_minutes'], unit=' min')}")
+    if ex.get("possible_triggers"):
+        parts.append("Before it: " + esc(", ".join(t.replace("_", " ") for t in ex["possible_triggers"])))
     parts.append("")
     parts.append("Saved to the doctor report. If it keeps happening or feels worse, contact your doctor.")
     return _assemble(parts)

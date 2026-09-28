@@ -437,6 +437,15 @@ async def test_palp_with_time_and_note(bot, service):
     assert "Logged" in replies(upd)[0]
 
 
+async def test_palp_from_dad_is_copied_to_admin(bot, service):
+    fake = AsyncMock(name="tgbot")
+    bot.app.bot = fake
+    upd = make_update(USER_CHAT, "/palp dizzy")
+    await bot.cmd_palp(upd, make_context(["dizzy"]))
+    sent_to = {c.kwargs["chat_id"] for c in fake.send_message.await_args_list}
+    assert sent_to == {ADMIN_CHAT}  # Dad already got the reply; the admin gets a copy
+
+
 async def test_palp_without_time_uses_now(bot, service):
     upd = make_update(USER_CHAT, "/palp dizzy")
     await bot.cmd_palp(upd, make_context(["dizzy"]))
