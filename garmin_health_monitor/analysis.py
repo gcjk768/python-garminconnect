@@ -125,6 +125,7 @@ TRIGGER_WORDS = (
     "lying_down", "missed_medication", "heat", "unknown",
 )
 RED_FLAG_KEYS = ("chest_pain", "fainting", "severe_breathlessness")
+RED_FLAG_SYMPTOMS = {"chest_pain", "chest_tightness", "fainting", "near_fainting"}
 
 # Structured fields pulled out of a free-text /palp or /note message.
 EXTRACT_SCHEMA: dict[str, Any] = {
@@ -148,8 +149,9 @@ EXTRACT_SCHEMA: dict[str, Any] = {
 }
 
 # Hard-coded red-flag check: works with no LLM and cannot be talked out of it.
+# Deliberately broad: any chest mention alongside a palpitation log gets the 995 banner.
 _RED_FLAG_RE = re.compile(
-    r"chest\s*(pain|hurt|tight|pressure)|faint|passed\s*out|black(ed)?\s*out|collaps|"
+    r"chest|faint|passed\s*out|black(ed)?\s*out|collaps|"
     r"can'?t\s*breathe|cannot\s*breathe|short(ness)?\s*of\s*breath|breathless",
     re.IGNORECASE,
 )
@@ -738,7 +740,8 @@ def has_red_flag(note: str, extracted: dict[str, Any] | None = None) -> bool:
     """True if the note or the extracted fields mention chest pain, fainting or bad breathlessness."""
     if note and _RED_FLAG_RE.search(note):
         return True
-    return any((extracted or {}).get("red_flags", {}).values())
+    ex = extracted or {}
+    return any(ex.get("red_flags", {}).values()) or bool(RED_FLAG_SYMPTOMS & set(ex.get("symptoms") or []))
 
 
 # ---------------------------------------------------------------------------

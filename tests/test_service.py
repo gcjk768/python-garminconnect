@@ -311,4 +311,6 @@ def test_red_flag_keywords_work_without_llm():
     from garmin_health_monitor.analysis import has_red_flag
     assert has_red_flag("I nearly fainted")
     assert has_red_flag("chest tightness and pain")
+    assert has_red_flag("some pressure in my chest")
+    assert has_red_flag("felt odd", {"symptoms": ["near_fainting"], "red_flags": {}})
     assert not has_red_flag("fluttering after lunch")

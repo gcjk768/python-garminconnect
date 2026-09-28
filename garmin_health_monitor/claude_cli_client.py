@@ -12,6 +12,9 @@ Each call spawns ``claude -p`` with:
 * ``--no-session-persistence`` so thousands of tiny sessions are not written
   to disk.
 
+``--safe-mode`` (or ``--bare`` with an API key) keeps the user's CLAUDE.md,
+hooks, plugins and MCP servers out of the call.
+
 Authentication is whatever the CLI already has: a subscription login, a
 long-lived token from ``claude setup-token`` in ``CLAUDE_CODE_OAUTH_TOKEN`` or
 an ``ANTHROPIC_API_KEY``.
@@ -91,7 +94,7 @@ class ClaudeCliClient:
             return False
         try:
             proc = self._runner(
-                [self.cfg.command, "--version"],
+                [exe, "--version"],
                 capture_output=True,
                 text=True,
                 timeout=30,
@@ -144,8 +147,10 @@ class ClaudeCliClient:
             return "."
 
     def build_args(self, system: str, schema: dict[str, Any] | None = None) -> list[str]:
+        # full path so Windows finds claude.cmd / claude.exe (subprocess does not search PATHEXT)
+        command = (shutil.which(self.cfg.command) if self._runner is subprocess.run else None) or self.cfg.command
         args = [
-            self.cfg.command,
+            command,
             "-p",
             "--output-format",
             "json",
@@ -162,8 +167,10 @@ class ClaudeCliClient:
             "--system-prompt",
             system,
         ]
-        if self.cfg.bare:
-            args.insert(1, "--bare")
+        # bare needs ANTHROPIC_API_KEY; safe mode keeps the subscription login but still drops
+        # CLAUDE.md, hooks, plugins and MCP servers, which otherwise hijack the answer and
+        # cost ~100x the tokens
+        args.insert(1, "--bare" if self.cfg.bare else "--safe-mode")
         if self.cfg.effort:
             args += ["--effort", str(self.cfg.effort)]
         if self.cfg.max_budget_usd:

@@ -21,14 +21,18 @@ telegram:
 llm:
   backend: ${LLM_BACKEND:-claude-cli}   # claude-cli | ollama | none
   claude:                               # Claude Code CLI in print mode: `claude -p`
-    command: claude
+    command: claude                     # Windows: use the full path to
+                                        # %APPDATA%/npm/node_modules/@anthropic-ai/claude-code/bin/claude.exe
+                                        # (the claude.cmd shim mangles the JSON schema and multi-line prompts)
     model: ${CLAUDE_MODEL:-sonnet}      # alias (sonnet, opus, haiku) or full model id
     timeout_seconds: 240
     max_turns: 3                        # keep >= 2: structured output arrives via a tool call
     effort: low                         # low | medium | high; low is plenty for summaries
     # max_budget_usd: 0.05              # per-call ceiling (API-key users only)
-    # bare: true                        # recommended on the NAS: skips hooks/plugins/MCP/CLAUDE.md;
-                                        # needs ANTHROPIC_API_KEY (Console key), not a subscription login
+    # Subscription login (no API key) is the default: calls run with --safe-mode, which skips
+    # CLAUDE.md, hooks, plugins and MCP servers. On the NAS run `claude setup-token` once and
+    # pass CLAUDE_CODE_OAUTH_TOKEN in the container env.
+    # bare: false                       # true only with ANTHROPIC_API_KEY
     # extra_args: []                    # any other `claude` flags
 
 # Only used when llm.backend is "ollama".
