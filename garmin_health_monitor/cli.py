@@ -273,7 +273,7 @@ def cmd_test_llm(args: argparse.Namespace) -> int:
 
 def cmd_symptom(args: argparse.Namespace) -> int:
     cfg = _config(args)
-    service = _service(cfg, None)
+    service = _service(cfg, make_llm_client(cfg))  # the LLM extracts symptoms/triggers from the note
     p = _profile(cfg, args.profile)
     when = datetime.fromisoformat(args.time) if args.time else None
     print(service.log_symptom(p, when, args.note or "", None))
