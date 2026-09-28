@@ -357,7 +357,7 @@ class MonitorService:
         start = to_utc(datetime.combine(yesterday, time(hour=20), tzinfo=get_tz(profile.timezone)))
         overnight = self.storage.get_episodes(profile.name, start, self.clock()) if profile.features.palpitations else []
         coaching = self.stored_coaching(profile, yesterday)
-        return messages.morning_brief(profile, snap, yrow, overnight, coaching, self.fitness(profile, today))
+        return messages.morning_brief(profile, snap, yrow, overnight, coaching)
 
     def evening_summary_text(self, profile: ProfileConfig, day: date | None = None) -> str:
         day = day or self.today(profile)

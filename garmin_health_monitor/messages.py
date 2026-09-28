@@ -623,7 +623,6 @@ def morning_brief(
     yesterday_row: dict[str, Any] | None,
     overnight_episodes: Sequence[Episode] | None,
     coaching: CoachingAdvice | None,
-    fitness: dict[str, Any] | None = None,
 ) -> str:
     """🌅 Morning brief: last night's sleep, HRV, resting HR, readiness, overnight episodes."""
     tz = _tz(profile, today)
@@ -683,10 +682,6 @@ def morning_brief(
     elif palp_on:
         parts.append("❤️ No at-rest heart-rate excursions overnight.")
 
-    fit = fitness_lines(fitness)
-    if fit:
-        parts.append("")
-        parts.extend(fit)
     if coaching is not None:
         parts.append("")
         parts.append(coaching_block(coaching))

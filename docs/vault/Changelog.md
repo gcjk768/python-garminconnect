@@ -6,7 +6,7 @@ updated: 2026-09-29
 
 ## 2026-09-29 — Fitness section + schedule
 - `GarminSession.fetch_fitness`: VO2 max, training status + load balance, fitness age, weekly intensity minutes, race predictions (once per message, not every poll; falls back to yesterday's training status until Garmin processes today).
-- `messages.fitness_lines` → 💪 Fitness in morning brief and evening summary.
+- `messages.fitness_lines` → 💪 Fitness in the evening summary only (removed from morning brief at James's request).
 - NAS schedule: morning 09:00, evening 22:00, weekly Sunday 22:00.
 - Compose mounts `./garmin_health_monitor` so code updates need only a Restart.
 
