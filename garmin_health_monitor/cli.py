@@ -9,7 +9,6 @@ import logging
 import sys
 from collections.abc import Callable
 from datetime import date, datetime, timedelta
-from pathlib import Path
 
 from . import __version__
 from .config import AppConfig, ConfigError, ProfileConfig, load_config

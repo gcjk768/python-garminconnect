@@ -138,9 +138,9 @@ def test_poll_handles_garmin_down(tmp_path):
 
 def test_backfill_marks_historical_episodes_as_notified(svc):
     service, profile, sessions, _ = svc
-    sessions_before = len(sessions)
     # make earlier days carry an episode too
     session = service.session(profile)
+    sessions_before = len(sessions)  # after our own session() call: backfill must not add more
     session.episodes_by_day[DAY - timedelta(days=2)] = [(11, 0, 10, 130)]
     n = service.backfill(profile, 3)
     assert n == 3

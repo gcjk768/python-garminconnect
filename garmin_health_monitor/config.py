@@ -395,7 +395,7 @@ def parse_config(raw: dict[str, Any]) -> AppConfig:
     claude_cfg.extra_args = [str(a) for a in (claude_cfg.extra_args or [])]
     claude_cfg.env = {str(k): str(v) for k, v in (claude_cfg.env or {}).items()}
     if not claude_cfg.workdir:
-        claude_cfg.workdir = str(Path(data_dir) / "claude-workdir")
+        claude_cfg.workdir = f"{data_dir}/claude-workdir"  # same form as llm.make_llm_client
     backend = str(llm_raw.get("backend") or ("ollama" if raw.get("ollama") and not llm_raw else "claude-cli")).lower()
     backend = backend.replace("_", "-")
     if backend in {"claude", "claude-code"}:
