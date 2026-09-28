@@ -102,6 +102,7 @@ class FeatureFlags:
     palpitations: bool = False
     doctor_report: bool = False
     alerts: bool = True
+    heart_review: bool = False  # evening message = palpitation list only (time + HR), not the full summary
 
 
 @dataclass(slots=True)

@@ -370,6 +370,8 @@ class MonitorService:
         rows = self.rows(profile, 7, end=day)
         start, end = self.day_range_utc(profile, day, day)
         episodes = self.storage.get_episodes(profile.name, start, end)
+        if profile.features.heart_review:  # heart-only profile: no coaching, no fitness
+            return messages.heart_review(profile, day, episodes, snap)
         symptoms = self.storage.get_symptoms(profile.name, start, end)
         coaching = self._coaching(profile, snap)
         return messages.evening_summary(profile, snap, rows, episodes, symptoms, coaching, self.fitness(profile, snap.day))

@@ -365,18 +365,14 @@ def test_steps_message_without_history(profile, empty_snapshot):
 def test_episode_alert_content(profile, episodes, assessment):
     ep = episodes[0]
     text = M.episode_alert(profile, ep, assessment)
-    assert text.startswith("❤️ <b>Possible palpitation episode (Dad)</b>")
-    assert "Sun 27 Sep 10:00–10:08 · 8m" in text
-    assert "Peak 127 bpm vs baseline 64 bpm (+63)" in text
-    assert "Onset jump: +60 bpm" in text
-    assert "Context: at rest, 40 steps in the 15-min window" in text
-    assert "Heuristic confidence: High (0.75)" in text
-    assert "Model view: <b>possible palpitation</b> (confidence 0.70)" in text
-    assert assessment.reasoning in text
-    assert "Doctor note: 8 min at up to 127 bpm" in text
-    assert "<b>Was it felt?</b> Tap a button below — it goes into the doctor report." in text
+    assert text.startswith("❤️ <b>Possible palpitation — Dad</b>")
+    assert "📅 Sun 27 Sep · 🕒 10:00–10:08 (8m)" in text  # date + time
+    assert "Peak <b>127 bpm</b> · resting 64 bpm (+63)" in text  # heart rate
+    assert "At rest, 40 steps" in text
+    assert "AI view: possible palpitation" in text
+    assert "<b>Was it felt?</b> Tap below." in text
     assert "not a diagnosis" in text
-    assert "chest pain, fainting or breathlessness" in text
+    assert len(text.splitlines()) <= 8  # short enough to read at a glance
     _assert_valid_html(text)
 
 
@@ -384,12 +380,11 @@ def test_episode_alert_without_assessment_uses_stored_fields(profile, episodes):
     ep = episodes[1]
     ep.llm_assessment = None
     text = M.episode_alert(profile, ep, None)
-    assert "Model view" not in text
+    assert "AI view" not in text
     assert "Was it felt?" in text
     ep.llm_assessment = ASSESSMENT_EXERTION
-    ep.llm_model = "rules"
     text = M.episode_alert(profile, ep, None)
-    assert "Model view: <b>likely exertion or movement</b>" in text
+    assert "AI view: likely exertion or movement" in text
 
 
 def test_episode_alert_nocturnal_context(profile):
@@ -407,9 +402,23 @@ def test_episode_alert_nocturnal_context(profile):
         confidence=0.3,
     )
     text = M.episode_alert(profile, ep, None)
-    assert "Context: asleep" in text
-    assert "type: during sleep" in text
-    assert "Heuristic confidence: Low (0.30)" in text
+    assert "Asleep, 0 steps" in text
+    assert "Peak <b>96 bpm</b>" in text
+
+
+def test_heart_review_lists_time_and_heart_rate(profile, episodes, episode_day):
+    text = M.heart_review(profile, episode_day.day, episodes, episode_day)
+    assert text.startswith("❤️ <b>Heart review — Dad</b>")
+    assert f"Possible palpitations today: {len(episodes)}" in text
+    assert "🕒 10:00–10:08 · 💓 peak <b>127 bpm</b> (resting 64) · at rest" in text
+    assert "Coaching" not in text and "Fitness" not in text
+    _assert_valid_html(text)
+
+
+def test_heart_review_quiet_day(profile, episode_day):
+    text = M.heart_review(profile, episode_day.day, [], episode_day)
+    assert "No possible palpitations today." in text
+    _assert_valid_html(text)
 
 
 def test_episodes_list_content(profile, episodes, symptom):

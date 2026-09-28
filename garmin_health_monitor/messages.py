@@ -1098,47 +1098,48 @@ def steps_message(profile: ProfileConfig, snap: DaySnapshot, rows_7d: Sequence[d
 
 
 def episode_alert(profile: ProfileConfig, ep: Episode, assessment: EpisodeAssessment | None) -> str:
-    """❤️ Alert for one detected at-rest heart-rate excursion (buttons are added by the bot)."""
+    """❤️ Short alert for one possible palpitation: date, time, heart rate (buttons added by the bot)."""
     tz = _tz(profile)
-    parts: list[str | None] = [
-        f"❤️ <b>Possible palpitation episode ({_name(profile)})</b>",
-        "",
-        f"🕒 {_day_label(ep.start, tz)} {_time_range(ep.start, ep.end, tz)} · {_minutes(ep.duration_min)}",
-        f"📈 Peak {_n(ep.peak_hr, unit=' bpm')} vs baseline {_n(ep.baseline_hr, unit=' bpm')} (+{_n(ep.delta_hr)}) · "
-        f"average {_n(ep.mean_hr, unit=' bpm')}",
-    ]
-    if ep.max_jump_bpm:
-        parts.append(f"⚡ Onset jump: +{_n(ep.max_jump_bpm)} bpm between readings")
-    ctx = ["asleep"] if ep.asleep else ["at rest"]
-    ctx.append(f"{_n(ep.steps_in_window)} steps in the 15-min window")
-    if ep.activity_level and ep.activity_level != "unknown":
-        ctx.append(f"watch level: {_title(ep.activity_level)}")
-    if ep.stress_avg is not None:
-        ctx.append(f"stress {_n(ep.stress_avg)}")
-    parts.append("🧭 Context: " + ", ".join(ctx) + f" · type: {KIND_LABELS.get(ep.kind, esc(ep.kind))}")
-    parts.append(f"🎯 Heuristic confidence: {confidence_label(ep.confidence)} ({_n(ep.confidence, 2)})")
-
     code = assessment.assessment if assessment is not None else ep.llm_assessment
-    reasoning = assessment.reasoning if assessment is not None else ep.llm_reasoning
-    note = assessment.doctor_note if assessment is not None else ep.doctor_note
-    model = assessment.model if assessment is not None else ep.llm_model
-    conf = assessment.confidence if assessment is not None else ep.llm_confidence
+    parts: list[str | None] = [
+        f"❤️ <b>Possible palpitation — {_name(profile)}</b>",
+        f"📅 {_day_label(ep.start, tz)} · 🕒 {_time_range(ep.start, ep.end, tz)} ({_minutes(ep.duration_min)})",
+        f"💓 Peak <b>{_n(ep.peak_hr, unit=' bpm')}</b> · resting {_n(ep.baseline_hr, unit=' bpm')} "
+        f"(+{_n(ep.delta_hr)}) · avg {_n(ep.mean_hr, unit=' bpm')}",
+        f"🧭 {'Asleep' if ep.asleep else 'At rest'}, {_n(ep.steps_in_window)} steps",
+    ]
     if code:
-        parts.append("")
-        line = f"🤖 Model view: <b>{_assessment_label(code)}</b>"
-        if conf is not None:
-            line += f" (confidence {_n(conf, 2)})"
-        if model:
-            line += f" <i>({esc(model)})</i>"
-        parts.append(line)
-        if reasoning:
-            parts.append(f"<i>{esc(reasoning)}</i>")
-        if note:
-            parts.append(f"🩺 Doctor note: {esc(note)}")
-    parts.append("")
-    parts.append("<b>Was it felt?</b> Tap a button below — it goes into the doctor report.")
+        parts.append(f"🤖 AI view: {_assessment_label(code)}")
+    parts.append("<b>Was it felt?</b> Tap below.")
     parts.append(NOT_DIAGNOSIS)
     return _assemble(parts)
+
+
+def heart_review(
+    profile: ProfileConfig,
+    day: date,
+    episodes: Sequence[Episode] | None,
+    snap: DaySnapshot | None,
+) -> str:
+    """❤️ 22:00 heart review: every possible palpitation today with time and heart rate."""
+    tz = _tz(profile, snap)
+    eps = sorted(episodes or [], key=lambda e: e.start)
+    parts: list[str | None] = [f"❤️ <b>Heart review — {_name(profile)}</b> — {_day_label(day)}", ""]
+    if eps:
+        parts.append(f"<b>Possible palpitations today: {len(eps)}</b>")
+        parts.extend(
+            f"• 🕒 {_time_range(e.start, e.end, tz)} · 💓 peak <b>{_n(e.peak_hr, unit=' bpm')}</b> "
+            f"(resting {_n(e.baseline_hr)}) · {'asleep' if e.asleep else 'at rest'}"
+            for e in eps
+        )
+    else:
+        parts.append("✅ No possible palpitations today.")
+    if snap is not None:
+        s = snap.summary
+        parts.append("")
+        parts.append(f"Resting HR {_n(s.resting_hr, unit=' bpm')} · highest today {_n(s.max_hr, unit=' bpm')}")
+    parts.append(NOT_DIAGNOSIS)
+    return _assemble(_compact(parts))
 
 
 def _frequency_summary(episodes: Sequence[Episode], days: int, tz: str) -> str | None:
