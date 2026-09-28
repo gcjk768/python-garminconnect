@@ -545,12 +545,85 @@ def _rhr_line(snap: DaySnapshot, fallback_row: Any = None, avg_7d: float | None 
 # ---------------------------------------------------------------------------
 
 
+_BALANCE_TEXT = {
+    "AEROBIC_LOW_SHORTAGE": "needs more easy aerobic",
+    "AEROBIC_HIGH_SHORTAGE": "needs more tempo work",
+    "ANAEROBIC_SHORTAGE": "needs more hard intervals",
+    "BALANCED": "balanced",
+}
+
+
+def _first(d: Any) -> dict:
+    """First value of a ``{deviceId: {...}}`` map (Garmin keys per-device data by device id)."""
+    return next(iter(d.values()), {}) if isinstance(d, dict) and d else {}
+
+
+def _race_time(seconds: Any) -> str | None:
+    if not isinstance(seconds, int | float) or seconds <= 0:
+        return None
+    h, rem = divmod(int(seconds), 3600)
+    m, s = divmod(rem, 60)
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+
+
+def fitness_lines(fit: dict[str, Any] | None) -> list[str]:
+    """💪 VO2 max, fitness age, training status, weekly intensity minutes, race predictions."""
+    fit = fit or {}
+    ts = fit.get("training_status") or {}
+    lines: list[str] = []
+
+    vo2 = ((ts.get("mostRecentVO2Max") or {}).get("generic") or {})
+    vo2_val = vo2.get("vo2MaxPreciseValue") or vo2.get("vo2MaxValue")
+    age = fit.get("fitness_age") or {}
+    parts = []
+    if vo2_val:
+        parts.append(f"VO2 max {_n(vo2_val, 1)}")
+    if age.get("fitnessAge"):
+        txt = f"fitness age {_n(age['fitnessAge'], 1)}"
+        if age.get("chronologicalAge"):
+            txt += f" (real {_n(age['chronologicalAge'])})"
+        parts.append(txt)
+    if parts:
+        lines.append("🫀 " + " · ".join(parts))
+
+    status = _first((ts.get("mostRecentTrainingStatus") or {}).get("latestTrainingStatusData"))
+    phrase = re.sub(r"_\d+$", "", str(status.get("trainingStatusFeedbackPhrase") or ""))
+    balance = _first((ts.get("mostRecentTrainingLoadBalance") or {}).get("metricsTrainingLoadBalanceDTOMap"))
+    bal = str(balance.get("trainingBalanceFeedbackPhrase") or "")
+    if phrase or bal:
+        txt = f"📈 Training status: {esc(_title(phrase))}" if phrase else "📈 Training"
+        if bal:
+            txt += f" · load {esc(_BALANCE_TEXT.get(bal, _title(bal)))}"
+        lines.append(txt)
+
+    weeks = [w for w in fit.get("intensity") or [] if isinstance(w, dict)]
+    if weeks:
+        def total(w: dict) -> int:  # Garmin counts vigorous minutes double
+            return int(w.get("moderateValue") or 0) + 2 * int(w.get("vigorousValue") or 0)
+
+        goal = weeks[-1].get("weeklyGoal")
+        txt = f"⏱️ Intensity minutes this week {total(weeks[-1])}" + (f"/{goal}" if goal else "")
+        if len(weeks) > 1:
+            txt += f" · last week {total(weeks[-2])}"
+        lines.append(txt)
+
+    rp = fit.get("race_predictions") or {}
+    races = [(lbl, _race_time(rp.get(k))) for lbl, k in
+             (("5K", "time5K"), ("10K", "time10K"), ("Half", "timeHalfMarathon"), ("Full", "timeMarathon"))]
+    races = [f"{lbl} {t}" for lbl, t in races if t]
+    if races:
+        lines.append("🏁 Race predictions: " + " · ".join(races))
+
+    return ["💪 <b>Fitness</b>", *lines] if lines else []
+
+
 def morning_brief(
     profile: ProfileConfig,
     today: DaySnapshot,
     yesterday_row: dict[str, Any] | None,
     overnight_episodes: Sequence[Episode] | None,
     coaching: CoachingAdvice | None,
+    fitness: dict[str, Any] | None = None,
 ) -> str:
     """🌅 Morning brief: last night's sleep, HRV, resting HR, readiness, overnight episodes."""
     tz = _tz(profile, today)
@@ -610,6 +683,10 @@ def morning_brief(
     elif palp_on:
         parts.append("❤️ No at-rest heart-rate excursions overnight.")
 
+    fit = fitness_lines(fitness)
+    if fit:
+        parts.append("")
+        parts.extend(fit)
     if coaching is not None:
         parts.append("")
         parts.append(coaching_block(coaching))
@@ -623,6 +700,7 @@ def evening_summary(
     episodes_today: Sequence[Episode] | None,
     symptoms_today: Sequence[SymptomReport] | None,
     coaching: CoachingAdvice | None,
+    fitness: dict[str, Any] | None = None,
 ) -> str:
     """🌙 Evening summary: steps, activity, stress, body battery, sleep, episodes, coaching."""
     tz = _tz(profile, today)
@@ -704,6 +782,10 @@ def evening_summary(
         else:
             parts.append("📝 No symptoms reported today (use /palp if you felt something).")
 
+    fit = fitness_lines(fitness)
+    if fit:
+        parts.append("")
+        parts.extend(fit)
     if coaching is not None:
         parts.append("")
         parts.append(coaching_block(coaching))

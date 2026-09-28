@@ -579,3 +579,25 @@ def test_assemble_truncates_without_breaking_tags():
     assert len(text) <= 1000
     assert text.endswith("… (message shortened)")
     _assert_valid_html(text)
+
+
+def test_fitness_lines_from_real_garmin_shapes():
+    fit = {
+        "training_status": {
+            "mostRecentVO2Max": {"generic": {"vo2MaxPreciseValue": 48.7, "vo2MaxValue": 49.0}},
+            "mostRecentTrainingStatus": {"latestTrainingStatusData": {"3608002254": {"trainingStatusFeedbackPhrase": "RECOVERY_1"}}},
+            "mostRecentTrainingLoadBalance": {"metricsTrainingLoadBalanceDTOMap": {"3608002254": {"trainingBalanceFeedbackPhrase": "AEROBIC_LOW_SHORTAGE"}}},
+        },
+        "fitness_age": {"chronologicalAge": 31, "fitnessAge": 28.21},
+        "intensity": [
+            {"calendarDate": "2026-09-21", "weeklyGoal": 150, "moderateValue": 18, "vigorousValue": 45},
+            {"calendarDate": "2026-09-28", "weeklyGoal": 150, "moderateValue": 0, "vigorousValue": 0},
+        ],
+        "race_predictions": {"time5K": 1608, "time10K": 3504, "timeHalfMarathon": 8061, "timeMarathon": 18299},
+    }
+    text = "\n".join(M.fitness_lines(fit))
+    assert "VO2 max 48.7" in text and "fitness age 28.2 (real 31)" in text
+    assert "Training status: Recovery" in text and "needs more easy aerobic" in text
+    assert "this week 0/150 · last week 108" in text  # 18 + 2*45
+    assert "5K 26:48" in text and "Half 2:14:21" in text and "Full 5:04:59" in text
+    assert M.fitness_lines(None) == [] and M.fitness_lines({"training_status": {}}) == []

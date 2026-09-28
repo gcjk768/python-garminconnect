@@ -336,6 +336,14 @@ class MonitorService:
 
     # ------------------------------------------------------------ messages
 
+    def fitness(self, profile: ProfileConfig, day: date) -> dict[str, Any] | None:
+        """VO2 max, training status, intensity minutes, race times; ``None`` if Garmin refuses."""
+        try:
+            return self.session(profile).fetch_fitness(day)
+        except (GarminUnavailable, GarminAuthRequired) as exc:
+            logger.warning("%s: fitness data unavailable: %s", profile.name, exc)
+            return None
+
     def morning_brief_text(self, profile: ProfileConfig) -> str:
         today = self.today(profile)
         yesterday = today - timedelta(days=1)
@@ -349,7 +357,7 @@ class MonitorService:
         start = to_utc(datetime.combine(yesterday, time(hour=20), tzinfo=get_tz(profile.timezone)))
         overnight = self.storage.get_episodes(profile.name, start, self.clock()) if profile.features.palpitations else []
         coaching = self.stored_coaching(profile, yesterday)
-        return messages.morning_brief(profile, snap, yrow, overnight, coaching)
+        return messages.morning_brief(profile, snap, yrow, overnight, coaching, self.fitness(profile, today))
 
     def evening_summary_text(self, profile: ProfileConfig, day: date | None = None) -> str:
         day = day or self.today(profile)
@@ -364,7 +372,7 @@ class MonitorService:
         episodes = self.storage.get_episodes(profile.name, start, end)
         symptoms = self.storage.get_symptoms(profile.name, start, end)
         coaching = self._coaching(profile, snap)
-        return messages.evening_summary(profile, snap, rows, episodes, symptoms, coaching)
+        return messages.evening_summary(profile, snap, rows, episodes, symptoms, coaching, self.fitness(profile, snap.day))
 
     def weekly_review_text(self, profile: ProfileConfig) -> str:
         today = self.today(profile)

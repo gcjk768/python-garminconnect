@@ -27,6 +27,9 @@ class FakeSession:
         self.calls: list[tuple[date, bool]] = []
         self.fail = fail
 
+    def fetch_fitness(self, day):
+        return {"race_predictions": {"time5K": 1608}}
+
     def fetch_day(self, day, light=False):
         self.calls.append((day, light))
         if self.fail:

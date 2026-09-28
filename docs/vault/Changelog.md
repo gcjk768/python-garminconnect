@@ -4,6 +4,12 @@ updated: 2026-09-29
 ---
 # Changelog
 
+## 2026-09-29 — Fitness section + schedule
+- `GarminSession.fetch_fitness`: VO2 max, training status + load balance, fitness age, weekly intensity minutes, race predictions (once per message, not every poll; falls back to yesterday's training status until Garmin processes today).
+- `messages.fitness_lines` → 💪 Fitness in morning brief and evening summary.
+- NAS schedule: morning 09:00, evening 22:00, weekly Sunday 22:00.
+- Compose mounts `./garmin_health_monitor` so code updates need only a Restart.
+
 ## 2026-09-29 — NAS deploy + phone-sized messages
 - `Dockerfile` (python:3.12-slim + native Claude CLI, uid 1000) and `docker-compose.yaml`; stack at `/volume1/docker/garmin-monitor` in Dockge (:5001). `.env` there is mode 600.
 - Telegram: new bot @koh_heart_tracker_bot, member of James Channel, posts to topic 2665 "James Garmin Tracker".

@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import threading
 from collections.abc import Callable
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -167,6 +167,29 @@ class GarminSession:
         if not raw and errors:
             raise GarminUnavailable(f"All Garmin endpoints failed for {self.profile.name} on {d}: {errors}")
         return raw, errors
+
+    def fetch_fitness(self, day: date) -> dict[str, Any]:
+        """Slow-changing fitness data for the morning brief (fetched once a day, not every poll)."""
+        api, d, errors = self.api, day.isoformat(), {}
+        calls: dict[str, Callable[[], Any]] = {
+            "training_status": lambda: api.get_training_status(d),  # VO2 max, status, load balance
+            "fitness_age": lambda: api.get_fitnessage_data(d),
+            "race_predictions": lambda: api.get_race_predictions(),
+            "intensity": lambda: api.get_weekly_intensity_minutes((day - timedelta(days=13)).isoformat(), d),
+        }
+        out: dict[str, Any] = {}
+        for name, fn in calls.items():
+            value = self._call(name, fn, errors)
+            if value:
+                out[name] = value
+        ts = out.get("training_status") or {}
+        if not (ts.get("mostRecentVO2Max") or ts.get("mostRecentTrainingStatus")):
+            # Garmin fills today's training status only after it processes the day; use yesterday's
+            prev = (day - timedelta(days=1)).isoformat()
+            value = self._call("training_status", lambda: api.get_training_status(prev), errors)
+            if value:
+                out["training_status"] = value
+        return out
 
     def fetch_device(self) -> dict[str, Any] | None:
         errors: dict[str, str] = {}
