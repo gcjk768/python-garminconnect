@@ -152,7 +152,7 @@ def test_coaching_block_lists_and_disclaimer(coaching):
     assert "Do more" in text and "Do less" in text and "Watch out" in text
     assert "Take a second short walk after lunch" in text
     assert "Long sitting stretches" in text
-    assert "llama3.1:8b" in text
+    assert "llama3.1:8b" not in text  # no model tag: shorter card
     assert "not medical advice" in text
     assert M.coaching_block(None) == ""
 
@@ -199,11 +199,7 @@ def test_morning_brief_lists_overnight_episodes(profile, episode_day, episodes):
 def test_morning_brief_without_any_data(profile, empty_snapshot):
     text = M.morning_brief(profile, empty_snapshot, None, None, None)
     assert "No sleep data yet" in text
-    assert "HRV overnight: n/a" in text
-    assert "Resting HR: n/a" in text
-    assert "Body battery on waking: n/a" in text
-    assert "Training readiness: n/a" in text
-    assert "SpO2 overnight: n/a" in text
+    assert "n/a" not in text  # unmeasured values are hidden, not shown as n/a
     _assert_valid_html(text)
 
 
@@ -251,8 +247,7 @@ def test_evening_summary_unanswered_marker_and_empty_lists(profile, episode_day,
 
 def test_evening_summary_without_data(profile, empty_snapshot):
     text = M.evening_summary(profile, empty_snapshot, None, None, None, None)
-    assert "▱▱▱▱▱▱▱▱▱▱ n/a / n/a" in text
-    assert "Sleep last night n/a" in text
+    assert "n/a" not in text
     _assert_valid_html(text)
 
 
@@ -275,7 +270,7 @@ def test_weekly_review_table_and_deltas(profile, rows_7d, rows_prev_week, episod
 def test_weekly_review_without_rows(profile):
     text = M.weekly_review(profile, [], [], [], None)
     assert "No daily data stored for this week yet" in text
-    assert "Steps total n/a" in text
+    assert "n/a" not in text
     assert "No at-rest heart-rate excursions this week" in text
     _assert_valid_html(text)
 
@@ -307,10 +302,7 @@ def test_today_status_warns_when_sync_is_stale(profile, episode_day):
 
 def test_today_status_without_data(profile, empty_snapshot):
     text = M.today_status(profile, empty_snapshot, None, now=datetime(2026, 9, 27, 4, 0, tzinfo=UTC))
-    assert "Steps so far: ▱▱▱▱▱▱▱▱▱▱ n/a / n/a" in text
-    assert "Body battery: n/a" in text
-    assert "Last HR: n/a" in text
-    assert "Last sync: n/a" in text
+    assert "n/a" not in text
     assert "No sync time reported" in text
     _assert_valid_html(text)
 
@@ -565,9 +557,9 @@ def test_every_message_renders_with_empty_inputs(profile, empty_snapshot):
     for name, text in out.items():
         assert isinstance(text, str), name
         _assert_valid_html(text)
-    assert "n/a" in out["morning_brief"]
-    assert "n/a" in out["evening_summary"]
-    assert "n/a" in out["today_status"]
+    assert "n/a" not in out["morning_brief"]
+    assert "n/a" not in out["evening_summary"]
+    assert "n/a" not in out["today_status"]
     assert "n/a" in out["hr_message"]
 
 

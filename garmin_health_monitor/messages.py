@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import html
 import logging
+import re
 from collections import Counter
 from collections.abc import Iterable, Sequence
 from datetime import date, datetime
@@ -295,6 +296,20 @@ def _limited(items: Sequence[str], max_items: int) -> list[str]:
     return [*items[:max_items], f"… and {len(items) - max_items} more"]
 
 
+def _compact(parts: Sequence[str | None]) -> list[str | None]:
+    """Hide what was not measured: drop ``· x n/a`` segments, then lines left with no number."""
+    out: list[str | None] = []
+    for line in parts:
+        if line and NA in line:
+            line = " · ".join(seg for seg in line.split(" · ") if NA not in seg)
+            if not any(ch.isdigit() for ch in re.sub(r"<[^>]+>", "", line)):
+                continue
+        if line == "" and (not out or out[-1] == ""):
+            continue  # no double blank lines
+        out.append(line)
+    return out
+
+
 def _assemble(parts: Sequence[str | None], limit: int = MAX_LEN) -> str:
     """Join non-``None`` parts with newlines and keep the result under ``limit``.
 
@@ -403,7 +418,7 @@ def _activity_line(act: Any) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _bullets(title: str, items: Any, max_items: int = 5) -> list[str]:
+def _bullets(title: str, items: Any, max_items: int = 5, more: bool = True) -> list[str]:
     if not items:
         return []
     if isinstance(items, str):
@@ -414,29 +429,26 @@ def _bullets(title: str, items: Any, max_items: int = 5) -> list[str]:
         return []
     if not clean:
         return []
-    return [f"<b>{title}</b>", *_limited([f"• {esc(i)}" for i in clean], max_items)]
+    shown = [f"• {esc(i)}" for i in clean]
+    return [f"<b>{title}</b>", *(_limited(shown, max_items) if more else shown[:max_items])]
 
 
 def coaching_block(advice: CoachingAdvice | None) -> str:
-    """Render the do-more / do-less coaching from the model (``""`` when absent)."""
+    """Short do-more / do-less card from the model (``""`` when absent); phone-sized."""
     if advice is None:
         return ""
     period = "this week" if getattr(advice, "period", "daily") == "weekly" else "today"
-    model = getattr(advice, "model", None)
-    header = f"🧭 <b>Coaching for {period}</b>"
-    if model:
-        header += f" <i>({esc(model)})</i>"
-    lines: list[str] = [header]
+    lines: list[str] = [f"🧭 <b>Coaching for {period}</b>"]
     summary = getattr(advice, "summary", None)
     if summary:
-        lines.append(esc(summary))
-    lines.extend(_bullets("✅ Do more", getattr(advice, "do_more", None)))
-    lines.extend(_bullets("⛔ Do less", getattr(advice, "do_less", None)))
-    lines.extend(_bullets("👀 Watch out", getattr(advice, "watch_outs", None)))
+        lines.append(f"<i>{esc(summary)}</i>")
+    lines.extend(_bullets("✅ Do more", getattr(advice, "do_more", None), max_items=2, more=False))
+    lines.extend(_bullets("⛔ Do less", getattr(advice, "do_less", None), max_items=2, more=False))
+    lines.extend(_bullets("👀 Watch out", getattr(advice, "watch_outs", None), max_items=1, more=False))
     heart = getattr(advice, "heart_note", None)
     if heart:
         lines.append(f"❤️ {esc(heart)}")
-    lines.append("<i>AI suggestions generated from watch data, not medical advice.</i>")
+    lines.append("<i>AI tips, not medical advice.</i>")
     return "\n".join(lines)
 
 
@@ -601,7 +613,7 @@ def morning_brief(
     if coaching is not None:
         parts.append("")
         parts.append(coaching_block(coaching))
-    return _assemble(parts)
+    return _assemble(_compact(parts))
 
 
 def evening_summary(
@@ -695,7 +707,7 @@ def evening_summary(
     if coaching is not None:
         parts.append("")
         parts.append(coaching_block(coaching))
-    return _assemble(parts)
+    return _assemble(_compact(parts))
 
 
 def _week_table(rows: Sequence[Any]) -> str:
@@ -809,7 +821,7 @@ def weekly_review(
     if coaching is not None:
         parts.append("")
         parts.append(coaching_block(coaching))
-    return _assemble(parts)
+    return _assemble(_compact(parts))
 
 
 # ---------------------------------------------------------------------------
@@ -876,7 +888,7 @@ def today_status(
                 f"⚠️ Watch has not synced for {fmt_duration(age_h * 3600)} — "
                 "check it is worn and Garmin Connect is open on the phone."
             )
-    return _assemble(parts)
+    return _assemble(_compact(parts))
 
 
 def sleep_message(profile: ProfileConfig, snap: DaySnapshot) -> str:

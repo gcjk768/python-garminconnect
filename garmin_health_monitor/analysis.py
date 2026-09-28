@@ -70,7 +70,7 @@ COACHING_SCHEMA: dict[str, Any] = {
     "properties": {
         "summary": {
             "type": "string",
-            "description": "Two or three plain sentences about the day/week, quoting the numbers given.",
+            "description": "At most two short sentences (under 35 words) quoting the key numbers.",
         },
         "do_more": {
             "type": "array",
@@ -651,6 +651,11 @@ def _persona_lines(profile: ProfileConfig) -> str:
 
 def _coaching_system(profile: ProfileConfig, period: str) -> str:
     what = "one day" if period == "daily" else "one week compared with the week before"
+    heart_rule = (
+        "- heart_note: one calm sentence about the heart-rate observations, or an empty string.\n"
+        if profile.features.palpitations
+        else "- heart_note: always an empty string (heart tracking is off for this person).\n"
+    )
     return (
         "You are a calm, practical wellness coach reviewing "
         f"{what} of data from a Garmin watch.\n"
@@ -662,8 +667,10 @@ def _coaching_system(profile: ProfileConfig, period: str) -> str:
         "Do not name diseases. If something looks worth a check, say 'worth mentioning to your doctor'.\n"
         "- Plain, short, friendly sentences suitable for an older adult. No jargon, no exclamation marks.\n"
         "- Compare today with the recent averages and with the goals; quote the actual numbers.\n"
-        "- do_more and do_less must each contain 2 to 4 concrete, small, realistic actions.\n"
-        "- heart_note: one calm sentence about the heart-rate observations, or an empty string.\n"
+        "- do_more and do_less must each contain 2 to 4 concrete, small, realistic actions, "
+        "each under 12 words, most important first. It is read on a phone: be brief.\n"
+        "- summary: at most two short sentences.\n"
+        f"{heart_rule}"
         "Answer with JSON only, matching the schema."
     )
 
