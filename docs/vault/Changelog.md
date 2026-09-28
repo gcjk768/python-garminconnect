@@ -4,6 +4,13 @@ updated: 2026-09-29
 ---
 # Changelog
 
+## 2026-09-29 — NAS deploy + phone-sized messages
+- `Dockerfile` (python:3.12-slim + native Claude CLI, uid 1000) and `docker-compose.yaml`; stack at `/volume1/docker/garmin-monitor` in Dockge (:5001). `.env` there is mode 600.
+- Telegram: new bot @koh_heart_tracker_bot, member of James Channel, posts to topic 2665 "James Garmin Tracker".
+- Messages: unmeasured values hidden; coaching capped at 2 do more / 2 do less / 1 watch out; bullets under 12 words.
+- James's profile: status + coaching only (palpitations off). Dad's profile commented in the NAS config until his login exists.
+- All 223 tests green (fixed Windows path + backfill test).
+
 ## 2026-09-29 — `claude -p` on a subscription (no API key)
 - Calls now run with `--safe-mode`: drops CLAUDE.md/hooks/plugins/MCP (they overrode the schema; cost fell ~$0.58 → ~$0.005 per call).
 - Resolve the `claude` path before spawning; on Windows point `llm.claude.command` at `claude.exe` (the `.cmd` shim mangles JSON and multi-line args).

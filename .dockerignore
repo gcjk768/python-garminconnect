@@ -1,0 +1,11 @@
+.venv
+.git
+data
+config
+config.yaml
+.env
+*.db
+tests
+docs
+ghm.sh
+__pycache__

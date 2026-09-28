@@ -1,0 +1,16 @@
+# NAS stack (Dockge picks it up from /volume1/docker/garmin-monitor).
+# Secrets live in ./.env next to this file: HEART_BOT_TOKEN, HEART_ADMIN_CHAT,
+# MY_GARMIN_EMAIL, MY_GARMIN_PASSWORD, CLAUDE_CODE_OAUTH_TOKEN (from `claude setup-token`).
+services:
+  garmin-monitor:
+    build: .
+    image: garmin-monitor:local
+    container_name: garmin-monitor
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      TZ: Asia/Singapore
+    volumes:
+      - ./config:/config:ro
+      - ./data:/data
+    mem_limit: 768m        # python ~150 MB + one claude -p call at a time
