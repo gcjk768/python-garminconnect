@@ -1,0 +1,113 @@
+# Garmin Health Monitor configuration.
+# Copy to config/config.yaml.  Any value may reference an environment variable with
+# ${VAR} or ${VAR:-default}; keep secrets in the NAS's Docker environment (.env).
+
+timezone: ${TZ:-Asia/Singapore}     # default zone for schedules and message times
+data_dir: /data                     # tokens, database, generated reports live here
+database: /data/monitor.db
+log_level: INFO
+
+telegram:
+  bot_token: ${TELEGRAM_BOT_TOKEN}
+  # Chats that may run every command for every profile (your own chat id).
+  # A destination can be a private chat id (123456789), a group (-100...),
+  # or a forum topic inside a group written as "chat:topic".
+  # Example: the link t.me/c/2069000031/2665 is chat -1002069000031, topic 2665.
+  admin_chat_ids:
+    - ${TELEGRAM_ADMIN_CHAT_ID}
+    # - "-1002069000031:2665"
+
+# Which language model writes the coaching and episode assessments.
+llm:
+  backend: ${LLM_BACKEND:-claude-cli}   # claude-cli | ollama | none
+  claude:                               # Claude Code CLI in print mode: `claude -p`
+    command: claude
+    model: ${CLAUDE_MODEL:-sonnet}      # alias (sonnet, opus, haiku) or full model id
+    timeout_seconds: 240
+    max_turns: 3                        # keep >= 2: structured output arrives via a tool call
+    effort: low                         # low | medium | high; low is plenty for summaries
+    # max_budget_usd: 0.05              # per-call ceiling (API-key users only)
+    # bare: false                       # true only with ANTHROPIC_API_KEY (skips hooks/settings)
+    # extra_args: []                    # any other `claude` flags
+
+# Only used when llm.backend is "ollama".
+ollama:
+  base_url: ${OLLAMA_URL:-http://ollama:11434}
+  model: ${OLLAMA_MODEL:-llama3.1:8b}
+  timeout_seconds: 180
+  keep_alive: 30m
+  temperature: 0.2
+  num_ctx: 8192
+  auto_pull: false            # true = pull the model on start if it is missing
+
+schedule:
+  poll_minutes: 15            # how often to pull fresh data & run the palpitation detector
+  morning_brief: "07:30"
+  evening_summary: "21:00"
+  weekly_review_day: sun
+  weekly_review_time: "19:00"
+  doctor_report_day_of_month: 1
+  doctor_report_time: "09:00"
+  doctor_report_days: 30
+  backfill_days: 7            # history to fetch on first start (for baselines and trends)
+
+# Defaults applied to every profile (each profile may override any key).
+profile_defaults:
+  language: English
+  features:
+    morning_brief: true
+    evening_summary: true
+    weekly_review: true
+    daily_coaching: true
+    alerts: true
+    palpitations: false
+    doctor_report: false
+  alerts:
+    rhr_above_7d_avg: 10      # resting HR this many bpm above the 7-day average
+    rhr_absolute_high: 90
+    spo2_below: 90
+    body_battery_below: 15
+    no_sync_hours: 12         # nag when the watch has not synced for this long
+    sedentary_nudge_hour: 15
+    sedentary_nudge_steps: 1500
+
+profiles:
+  - name: Dad
+    garmin:
+      email: ${DAD_GARMIN_EMAIL}
+      password: ${DAD_GARMIN_PASSWORD}
+      tokenstore: /data/tokens/dad
+      is_cn: false
+    # Where Dad's messages go: your chat, a family group topic, Dad's own chat...
+    telegram_chat_ids:
+      - ${TELEGRAM_ADMIN_CHAT_ID}
+      # - "-1002069000031:2665"
+    timezone: Asia/Singapore
+    persona: "68-year-old man, retired, reports occasional heart palpitations, otherwise active"
+    goals: "walk at least 6000 steps a day, sleep 7 hours, keep stress low"
+    features:
+      palpitations: true
+      doctor_report: true
+      daily_coaching: true
+    palpitations:
+      rest_hr_threshold: 100        # bpm at rest that counts as a candidate
+      rise_over_baseline: 35        # bpm above the 30-min at-rest baseline
+      spike_hr_threshold: 120
+      nocturnal_hr_threshold: 90
+      min_duration_minutes: 4
+      max_steps_in_window: 120      # more steps than this in the 15-min bucket = walking, not rest
+      alert_min_confidence: 0.45
+      notify: true
+      quiet_hours: [23, 7]          # hold non-critical alerts overnight, deliver in the morning
+
+  - name: Me
+    garmin:
+      email: ${MY_GARMIN_EMAIL}
+      password: ${MY_GARMIN_PASSWORD}
+      tokenstore: /data/tokens/me
+    telegram_chat_ids:
+      - ${TELEGRAM_ADMIN_CHAT_ID}
+    persona: "30s, office job, trains 3x a week"
+    goals: "10k steps, 3 workouts a week, 7.5h sleep"
+    features:
+      palpitations: false
