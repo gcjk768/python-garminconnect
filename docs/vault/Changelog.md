@@ -4,6 +4,11 @@ updated: 2026-09-29
 ---
 # Changelog
 
+## 2026-09-29 — Alerts explain possible links
+- Alert adds "🔍 Possible links" (software rules via `analysis.episode_links`: sleep last night, high-stress minutes, Body Battery vs his 14-day median) and a fixed safe "🌿 Now" tip. No medicine advice.
+- September check: nearly every episode day had short/poor sleep and/or a very stressful day (e.g. 3.4 h sleep before 24 Sep).
+- Monthly calendar chart (`charts.heart_calendar`) and a one-off Claude "what September shows" report (sent manually; automation needs CLAUDE_CODE_OAUTH_TOKEN on the NAS).
+
 ## 2026-09-29 — Garmin outage handling
 - 10:17 Garmin HTTP 521 outage fired raw error dumps + a misleading "run login" on the first failed poll; both stacks recovered by themselves (tokens fine).
 - Now: failures are remembered; one plain alert only after 2h (login vs servers down); "✅ data is back" on recovery.
