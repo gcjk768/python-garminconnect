@@ -4,6 +4,10 @@ updated: 2026-09-29
 ---
 # Changelog
 
+## 2026-09-29 — Dad: tables + weekly summary
+- Heart review (22:00) and monthly/weekly summaries use one aligned `<pre>` table (date, time, peak, minutes); only AI-ruled-out episodes hidden.
+- Dad weekly summary every Sunday 22:00 (`weekly_review_text` returns `heart_month` for heart-only profiles).
+
 ## 2026-09-29 — Dad's heart tracker live
 - Second NAS stack `dad-heart-monitor` (same image + mounted code as `garmin-monitor`), bot @koh_dad_heart_bot "Dad Heart Tracker" → James Channel topic 2677 "Dad Garmin Tracker".
 - Features: instant palpitation alert (date, time, peak/before HR, state, AI view) + 22:00 heart review (`features.heart_review`). Nothing else.
