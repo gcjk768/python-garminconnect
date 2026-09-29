@@ -1104,7 +1104,7 @@ def episode_alert(profile: ProfileConfig, ep: Episode, assessment: EpisodeAssess
     parts: list[str | None] = [
         f"❤️ <b>Possible palpitation — {_name(profile)}</b>",
         f"📅 {_day_label(ep.start, tz)} · 🕒 {_time_range(ep.start, ep.end, tz)} ({_minutes(ep.duration_min)})",
-        f"💓 Peak <b>{_n(ep.peak_hr, unit=' bpm')}</b> · resting {_n(ep.baseline_hr, unit=' bpm')} "
+        f"💓 Peak <b>{_n(ep.peak_hr, unit=' bpm')}</b> · before {_n(ep.baseline_hr, unit=' bpm')} "
         f"(+{_n(ep.delta_hr)}) · avg {_n(ep.mean_hr, unit=' bpm')}",
         f"🧭 {'Asleep' if ep.asleep else 'At rest'}, {_n(ep.steps_in_window)} steps",
     ]
@@ -1129,7 +1129,7 @@ def heart_review(
         parts.append(f"<b>Possible palpitations today: {len(eps)}</b>")
         parts.extend(
             f"• 🕒 {_time_range(e.start, e.end, tz)} · 💓 peak <b>{_n(e.peak_hr, unit=' bpm')}</b> "
-            f"(resting {_n(e.baseline_hr)}) · {'asleep' if e.asleep else 'at rest'}"
+            f"(before {_n(e.baseline_hr)}) · {'asleep' if e.asleep else 'at rest'}"
             for e in eps
         )
     else:

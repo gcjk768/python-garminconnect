@@ -367,7 +367,7 @@ def test_episode_alert_content(profile, episodes, assessment):
     text = M.episode_alert(profile, ep, assessment)
     assert text.startswith("❤️ <b>Possible palpitation — Dad</b>")
     assert "📅 Sun 27 Sep · 🕒 10:00–10:08 (8m)" in text  # date + time
-    assert "Peak <b>127 bpm</b> · resting 64 bpm (+63)" in text  # heart rate
+    assert "Peak <b>127 bpm</b> · before 64 bpm (+63)" in text  # heart rate
     assert "At rest, 40 steps" in text
     assert "AI view: possible palpitation" in text
     assert "<b>Was it felt?</b> Tap below." in text
@@ -410,7 +410,7 @@ def test_heart_review_lists_time_and_heart_rate(profile, episodes, episode_day):
     text = M.heart_review(profile, episode_day.day, episodes, episode_day)
     assert text.startswith("❤️ <b>Heart review — Dad</b>")
     assert f"Possible palpitations today: {len(episodes)}" in text
-    assert "🕒 10:00–10:08 · 💓 peak <b>127 bpm</b> (resting 64) · at rest" in text
+    assert "🕒 10:00–10:08 · 💓 peak <b>127 bpm</b> (before 64) · at rest" in text
     assert "Coaching" not in text and "Fitness" not in text
     _assert_valid_html(text)
 
