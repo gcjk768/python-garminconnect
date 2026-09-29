@@ -714,6 +714,15 @@ class Storage:
                 (key, profile, _iso(now_utc())),
             )
 
+    def backup_to(self, path: str | Path) -> None:
+        """Consistent copy of the live database (SQLite online backup; safe while the app writes)."""
+        dst = sqlite3.connect(str(path))
+        try:
+            with self._lock:
+                self._conn.backup(dst)
+        finally:
+            dst.close()
+
     def kv_get(self, key: str, default: str | None = None) -> str | None:
         with self._lock:
             row = self._conn.execute("SELECT value FROM kv WHERE key=?", (key,)).fetchone()

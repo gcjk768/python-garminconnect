@@ -534,6 +534,18 @@ class MonitorService:
             return None
         return messages.workout_nudge(profile, done, goal, 6 - today.weekday())
 
+    def backup(self, keep: int = 30) -> Path | None:
+        """Nightly database copy into ``backup_dir`` as monitor-YYYY-MM-DD.db; keeps the newest ``keep``."""
+        if not self.config.backup_dir:
+            return None
+        root = Path(self.config.backup_dir)
+        root.mkdir(parents=True, exist_ok=True)
+        path = root / f"monitor-{to_local(self.clock(), self.config.timezone):%Y-%m-%d}.db"
+        self.storage.backup_to(path)
+        for old in sorted(root.glob("monitor-*.db"))[:-keep]:
+            old.unlink()
+        return path
+
     # ---------------------------------------------------------- medication
 
     @staticmethod

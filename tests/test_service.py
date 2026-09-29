@@ -417,3 +417,18 @@ def test_workout_nudge_only_when_behind(svc):
     assert text is None or text.startswith("🏃 <b>0 of 3 workouts this week</b>")
     profile.goals = "walk more"
     assert service.workout_nudge_text(profile) is None
+
+
+def test_nightly_backup_is_a_readable_copy_and_keeps_newest(svc, tmp_path):
+    import sqlite3
+
+    service, profile, _, clock = svc
+    service.poll(profile)
+    service.config.backup_dir = str(tmp_path / "backups")
+    for i in range(3):
+        clock["now"] = local(DAY + timedelta(days=i), 3, 30)
+        path = service.backup(keep=2)
+    kept = sorted(p.name for p in (tmp_path / "backups").glob("monitor-*.db"))
+    assert kept == [f"monitor-{DAY + timedelta(days=1)}.db", f"monitor-{DAY + timedelta(days=2)}.db"]
+    rows = sqlite3.connect(path).execute("select count(*) from daily_snapshots").fetchone()[0]
+    assert rows >= 1  # a real, openable database with the data in it

@@ -208,6 +208,7 @@ class AppConfig:
     log_level: str = "INFO"
     llm: LLMConfig = field(default_factory=LLMConfig)
     vault_dir: str | None = None  # Obsidian vault logging every possible palpitation (optional)
+    backup_dir: str | None = None  # nightly copies of the database (optional; keeps the newest BACKUP_KEEP)
 
     def thread_for(self, chat_id: int, profile: ProfileConfig | None = None) -> int | None:
         """Forum topic (message_thread_id) to post into for ``chat_id``, if configured."""
@@ -468,6 +469,7 @@ def parse_config(raw: dict[str, Any]) -> AppConfig:
         log_level=str(raw.get("log_level") or "INFO").upper(),
         llm=llm,
         vault_dir=str(raw.get("vault_dir") or "") or None,
+        backup_dir=str(raw.get("backup_dir") or "") or None,
     )
 
 

@@ -52,6 +52,8 @@ class Scheduler:
         sched = self.config.schedule
         jq.run_once(self.job_startup, when=timedelta(seconds=5), name="startup")
         jq.run_repeating(self.job_poll, interval=timedelta(minutes=sched.poll_minutes), first=timedelta(seconds=60), name="poll")
+        if self.config.backup_dir:
+            jq.run_daily(self.job_backup, time=_at("03:30", self.config.timezone), name="backup")
         for p in self.config.profiles:
             tz = p.timezone or self.config.timezone
             if p.features.morning_brief:
@@ -136,6 +138,14 @@ class Scheduler:
         text = await asyncio.to_thread(self.service.workout_nudge_text, p)
         if text:
             await self.bot.send_text(p.telegram_chat_ids, text, None, p)
+
+    async def job_backup(self, context: ContextTypes.DEFAULT_TYPE) -> None:
+        try:
+            path = await asyncio.to_thread(self.service.backup)
+            logger.info("Database backed up to %s", path)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("backup failed")
+            await self._notify_admins(f"⚠️ Nightly database backup failed: {messages.esc(str(exc))}")
 
     async def job_medication(self, context: ContextTypes.DEFAULT_TYPE) -> None:
         p, hhmm = context.job.data  # type: ignore[union-attr]
