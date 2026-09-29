@@ -4,6 +4,14 @@ updated: 2026-09-29
 ---
 # Changelog
 
+## 2026-09-29 — Safety + routine features ("do all")
+- Dad alerts: `alerts.only: [no_sync, low_hr, garmin_abnormal_hr]`; watch not synced 6h; low HR < 40 bpm for 10 min awake (PLACEHOLDER, confirm with doctor; backtest on Sept: 0 days).
+- Dad medicine: metoprolol 50 mg reminder 09:00 (PLACEHOLDER time) with ✅ Taken button; status in the 22:00 heart review; started 2026-09-27 marked on the calendar.
+- 1st of month 09:00: Dad calendar + Claude month report (needs token) + doctor PDF/CSV; James 30-day progress picture.
+- James: Thursday 19:00 workout nudge when behind "3 workouts a week".
+- Both: nightly 03:30 SQLite online backup to /volume1/James/Backups/<stack>, keep 30.
+- Default branch fast-forwarded to `father`.
+
 ## 2026-09-29 — Alerts explain possible links
 - Alert adds "🔍 Possible links" (software rules via `analysis.episode_links`: sleep last night, high-stress minutes, Body Battery vs his 14-day median) and a fixed safe "🌿 Now" tip. No medicine advice.
 - September check: nearly every episode day had short/poor sleep and/or a very stressful day (e.g. 3.4 h sleep before 24 Sep).
