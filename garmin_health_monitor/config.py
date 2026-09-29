@@ -91,6 +91,9 @@ class AlertConfig:
     sedentary_nudge_hour: int = 15  # local hour to check for very low steps
     sedentary_nudge_steps: int = 1500
     abnormal_hr_alerts: bool = True  # notify when Garmin's own abnormal-HR alert count rises
+    low_hr_below: int | None = None  # awake heart rate under this for low_hr_minutes -> alert (off by default)
+    low_hr_minutes: int = 10
+    only: tuple[str, ...] | None = None  # emit only these rule kinds, e.g. [no_sync, low_hr]
 
 
 @dataclass(slots=True)
@@ -103,6 +106,15 @@ class FeatureFlags:
     doctor_report: bool = False
     alerts: bool = True
     heart_review: bool = False  # evening message = palpitation list only (time + HR), not the full summary
+    monthly_summary: bool = False  # 1st of month: calendar + AI report (heart) or 30-day progress picture
+    workout_nudge: bool = False  # mid-week nudge when behind the weekly workout goal
+
+
+@dataclass(slots=True)
+class MedicationConfig:
+    name: str = ""  # e.g. "Metoprolol tartrate 50 mg"
+    times: tuple[str, ...] = ()  # local HH:MM reminder times; empty = no reminders
+    started: str | None = None  # YYYY-MM-DD; marked on the monthly calendar and given to the AI report
 
 
 @dataclass(slots=True)
@@ -118,6 +130,7 @@ class ProfileConfig:
     features: FeatureFlags = field(default_factory=FeatureFlags)
     palpitations: PalpitationConfig = field(default_factory=PalpitationConfig)
     alerts: AlertConfig = field(default_factory=AlertConfig)
+    medication: MedicationConfig = field(default_factory=MedicationConfig)
 
     @property
     def slug(self) -> str:
@@ -177,6 +190,10 @@ class ScheduleConfig:
     doctor_report_time: str = "09:00"
     doctor_report_days: int = 30
     backfill_days: int = 7  # days of history to fetch on first start
+    monthly_summary_day: int = 1  # previous month's summary (features.monthly_summary)
+    monthly_summary_time: str = "09:00"
+    workout_nudge_day: str = "thu"  # features.workout_nudge
+    workout_nudge_time: str = "19:00"
 
 
 @dataclass(slots=True)
@@ -357,6 +374,7 @@ def _parse_profile(data: dict[str, Any], defaults: dict[str, Any], data_dir: str
         features=features,
         palpitations=_dataclass_from(PalpitationConfig, palp_raw, f"{where}.palpitations"),
         alerts=_dataclass_from(AlertConfig, alerts_raw, f"{where}.alerts"),
+        medication=_dataclass_from(MedicationConfig, data.get("medication"), f"{where}.medication"),
     )
     _check_tz(profile.timezone, where)
     qh = profile.palpitations.quiet_hours

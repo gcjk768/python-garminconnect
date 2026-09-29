@@ -86,3 +86,41 @@ def test_keys_are_per_day_for_dedupe():
     snap.summary.last_sync = now
     keys = [a.key for a in evaluate_alerts(p, snap, now=now)]
     assert f"rhr_high:Dad:{snap.date_str}" in keys
+
+
+def _with_low_hr(snap, hour, minutes, hr=36):
+    from datetime import datetime, time
+
+    from garmin_health_monitor.models import HRSample
+
+    start = datetime.combine(snap.day, time(hour=hour), tzinfo=get_tz(snap.tz))
+    end = start + timedelta(minutes=minutes)
+    snap.hr = [HRSample(ts=s.ts, hr=hr) if start <= s.ts < end else s for s in snap.hr]
+    return snap
+
+
+def test_low_hr_while_awake_alerts_once_with_time_and_lowest():
+    p = make_profile()
+    p.alerts.low_hr_below, p.alerts.low_hr_minutes = 40, 10
+    snap = _with_low_hr(make_snapshot(), 14, 14)
+    alerts = [a for a in evaluate_alerts(p, snap, now=snap.summary.last_sync) if a.key.startswith("low_hr")]
+    assert len(alerts) == 1
+    assert "Under 40 bpm for" in alerts[0].body and "from 14:00" in alerts[0].body and "lowest 36" in alerts[0].body
+
+
+def test_low_hr_short_dip_or_off_by_default_is_silent():
+    p = make_profile()
+    snap = _with_low_hr(make_snapshot(), 14, 14)
+    assert not [a for a in evaluate_alerts(p, snap, now=snap.summary.last_sync) if a.key.startswith("low_hr")]
+    p.alerts.low_hr_below = 40
+    snap = _with_low_hr(make_snapshot(), 14, 4)  # 4 minutes is too short
+    assert not [a for a in evaluate_alerts(p, snap, now=snap.summary.last_sync) if a.key.startswith("low_hr")]
+
+
+def test_only_keeps_listed_rules_and_no_sync_after_6h():
+    p = make_profile()
+    p.alerts.only, p.alerts.no_sync_hours = ("no_sync", "low_hr"), 6
+    snap = make_snapshot()
+    snap.summary.resting_hr, snap.summary.resting_hr_7d_avg = 72, 58  # would be rhr_high, filtered out
+    keys = [a.key.split(":")[0] for a in evaluate_alerts(p, snap, now=snap.summary.last_sync + timedelta(hours=7))]
+    assert keys == ["no_sync"]

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
@@ -385,7 +386,7 @@ class MonitorService:
         start, end = self.day_range_utc(profile, day, day)
         episodes = self.storage.get_episodes(profile.name, start, end)
         if profile.features.heart_review:  # heart-only profile: no coaching, no fitness
-            return messages.heart_review(profile, day, episodes, snap)
+            return messages.heart_review(profile, day, episodes, snap, self.med_status_line(profile, day))
         symptoms = self.storage.get_symptoms(profile.name, start, end)
         coaching = self._coaching(profile, snap)
         return messages.evening_summary(profile, snap, rows, episodes, symptoms, coaching, self.fitness(profile, snap.day))
@@ -482,6 +483,84 @@ class MonitorService:
         except Exception as exc:  # noqa: BLE001
             logger.warning("episode chart failed: %s", exc)
         return text, png
+
+    # -------------------------------------------------------- monthly / nudges
+
+    def monthly_summary(self, profile: ProfileConfig) -> tuple[bytes | None, str, str | None]:
+        """Previous month as ``(png, caption, extra_text)``.
+
+        Heart-only profiles: calendar + counts (+ the AI report as ``extra_text`` when an LLM is set).
+        Others: 30-day steps/sleep/resting-HR picture + a short progress caption.
+        """
+        today = self.today(profile)
+        last = today.replace(day=1) - timedelta(days=1)
+        first = last.replace(day=1)
+        start, end = self.day_range_utc(profile, first, last)
+        rows = self.storage.get_snapshot_rows(profile.name, first, last)
+        title = f"{first:%B %Y}"
+        if profile.features.heart_review:
+            shown = [e for e in self.storage.get_episodes(profile.name, start, end)
+                     if e.llm_assessment not in {"likely_exertion", "likely_artifact"}]
+            counts = Counter(to_local(e.start, profile.timezone).date() for e in shown)
+            has_data = {date.fromisoformat(str(r["day"])) for r in rows if r.get("day")}
+            med = profile.medication
+            marker = None
+            if med.started:
+                started = date.fromisoformat(med.started)
+                if first <= started <= last:
+                    marker = (started, "Medicine")
+            png = charts.heart_calendar(first.year, first.month, counts, has_data, f"{profile.name}'s heart · {title}", marker)
+            caption = messages.heart_month_caption(profile, title, counts, med)
+            extra = None
+            if self.llm is not None:
+                try:
+                    facts = analysis.heart_month_facts(profile, title, shown, rows)
+                    extra = messages.heart_month_report_text(profile, title, analysis.heart_month_report(self.llm, facts))
+                except LLMError as exc:
+                    logger.warning("%s: monthly AI report failed: %s", profile.name, exc)
+            return png, caption, extra
+        prev_last = first - timedelta(days=1)
+        prev_rows = self.storage.get_snapshot_rows(profile.name, prev_last.replace(day=1), prev_last)
+        png = charts.weekly_trend_chart(rows) if rows else None
+        return png, messages.progress_caption(profile, title, rows, prev_rows, self.fitness(profile, last)), None
+
+    def workout_nudge_text(self, profile: ProfileConfig) -> str | None:
+        """Mid-week nudge when workouts so far this week are behind the weekly goal (``None`` = on track)."""
+        today = self.today(profile)
+        monday = today - timedelta(days=today.weekday())
+        done = sum(len(r.get("activities") or []) for r in self.storage.get_snapshot_rows(profile.name, monday, today))
+        goal = analysis.parse_workout_goal(profile.goals)
+        if goal is None or done >= goal - 1:
+            return None
+        return messages.workout_nudge(profile, done, goal, 6 - today.weekday())
+
+    # ---------------------------------------------------------- medication
+
+    @staticmethod
+    def _med_key(profile: ProfileConfig, day: date, hhmm: str) -> str:
+        return f"med:{profile.slug}:{day.isoformat()}:{hhmm.replace(':', '')}"
+
+    def mark_med_taken(self, profile: ProfileConfig, day: date, hhmm: str) -> str:
+        """Record a tap on "Taken"; returns the local time it was recorded (HH:MM)."""
+        key = self._med_key(profile, day, hhmm)
+        if not self.storage.kv_get(key):
+            self.storage.kv_set(key, self.clock().isoformat())
+        taken = datetime.fromisoformat(str(self.storage.kv_get(key)))
+        return to_local(taken, profile.timezone).strftime("%H:%M")
+
+    def med_status_line(self, profile: ProfileConfig, day: date) -> str | None:
+        """Daily-review line like ``💊 Medicine: 09:00 ✅ taken 09:14``; ``None`` without medication."""
+        med = profile.medication
+        if not med.times:
+            return None
+        parts = []
+        for t in med.times:
+            raw = self.storage.kv_get(self._med_key(profile, day, t))
+            if raw:
+                parts.append(f"{t} ✅ taken {to_local(datetime.fromisoformat(raw), profile.timezone):%H:%M}")
+            else:
+                parts.append(f"{t} not marked as taken")
+        return "💊 Medicine: " + " · ".join(parts)
 
     # ------------------------------------------------------------ symptoms
 

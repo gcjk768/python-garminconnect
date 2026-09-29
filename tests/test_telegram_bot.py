@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -83,6 +83,10 @@ class FakeService:
     def log_symptom(self, profile, event_time, note, chat_id):
         self._rec("log_symptom", profile, event_time, note, chat_id)
         return f"Logged: {note or '(no note)'}"
+
+    def mark_med_taken(self, profile, day, hhmm):
+        self._rec("mark_med_taken", profile, day, hhmm)
+        return "09:14"
 
     def set_felt(self, profile, episode_id, felt):
         self._rec("set_felt", profile, episode_id, felt)
@@ -850,3 +854,22 @@ def test_help_text_mentions_every_registered_command(bot):
     names = {n for h in handlers for n in getattr(h, "commands", [])}
     for cmd in names - {"start", "analyse"}:
         assert f"/{cmd}" in text, cmd
+
+
+async def test_med_taken_button_records_and_shows_time(bot, service):
+    from garmin_health_monitor.telegram_bot import build_med_keyboard
+
+    kb = build_med_keyboard("dad", date(2026, 9, 29), "09:00")
+    data = kb.inline_keyboard[0][0].callback_data
+    assert data == "med:dad:2026-09-29:0900"
+    upd = make_callback_update(USER_CHAT, data, text="💊 Metoprolol · 09:00 dose")
+    await bot.cb_med(upd, make_context())
+    profile, day, hhmm = service.called("mark_med_taken")[0]
+    assert (profile.name, day, hhmm) == ("Dad", date(2026, 9, 29), "09:00")
+    upd.callback_query.answer.assert_awaited_with("Recorded: taken at 09:14")
+
+
+async def test_med_button_from_stranger_is_ignored(bot, service):
+    upd = make_callback_update(STRANGER_CHAT, "med:dad:2026-09-29:0900")
+    await bot.cb_med(upd, make_context())
+    assert not service.called("mark_med_taken")

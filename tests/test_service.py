@@ -56,6 +56,9 @@ class FakeLLM:
     def chat_json(self, system, user, schema):
         self.calls.append(("json", user))
         props = schema.get("properties", {})
+        if "ask_doctor" in props:
+            return {"summary": "Quiet month.", "why": ["Sleep score 60 vs 74."], "habits": ["Regular bedtime."],
+                    "ask_doctor": ["Is this worth a heart tracing?"]}
         if "red_flags" in props:
             chest = "chest" in user
             return {"event_type": "palpitation", "duration_minutes": 3, "symptoms": ["racing", "made_up"],
@@ -370,3 +373,47 @@ async def test_outage_past_midnight_rechecks_previous_day_on_recovery(svc):
     service.session(profile)  # the fake Garmin comes back
     await sched.deliver(profile, PollResult(profile="Dad", snapshot=None))
     assert (DAY - timedelta(days=1), False) in sessions[profile.name].calls  # yesterday re-read in full
+
+
+def test_medicine_taken_is_recorded_once_and_shown_in_heart_review(svc):
+    service, profile, _, clock = svc
+    profile.medication.name, profile.medication.times = "Metoprolol tartrate 50 mg", ("09:00",)
+    assert service.med_status_line(profile, DAY) == "💊 Medicine: 09:00 not marked as taken"
+    clock["now"] = local(DAY, 9, 14)
+    assert service.mark_med_taken(profile, DAY, "09:00") == "09:14"
+    clock["now"] = local(DAY, 10, 0)
+    assert service.mark_med_taken(profile, DAY, "09:00") == "09:14"  # a second tap keeps the first time
+    assert service.med_status_line(profile, DAY) == "💊 Medicine: 09:00 ✅ taken 09:14"
+    profile.features.heart_review = True
+    clock["now"] = local(DAY, 22, 0)
+    assert "09:00 ✅ taken 09:14" in service.evening_summary_text(profile)
+
+
+def test_monthly_summary_heart_calendar_and_ai_report(svc):
+    service, profile, _, clock = svc
+    service.backfill(profile, 3)
+    profile.features.heart_review = True
+    profile.medication.name, profile.medication.started = "Metoprolol", DAY.isoformat()
+    clock["now"] = local(DAY.replace(day=1) + timedelta(days=32), 9, 0).replace(day=1)  # 1st of next month
+    png, caption, extra = service.monthly_summary(profile)
+    assert png[:8] == b"\x89PNG\r\n\x1a\n"
+    assert caption.startswith("❤️ <b>Dad's heart · ") and "🟥" in caption and "💊 Metoprolol from" in caption
+    assert "Why it may happen" in extra and "Sleep score 60 vs 74." in extra and "call 995" in extra
+
+
+def test_monthly_summary_progress_for_normal_profile(svc):
+    service, profile, _, clock = svc
+    service.backfill(profile, 3)
+    clock["now"] = local(DAY.replace(day=1) + timedelta(days=32), 9, 0).replace(day=1)
+    png, caption, extra = service.monthly_summary(profile)
+    assert png[:8] == b"\x89PNG\r\n\x1a\n" and caption.startswith("📈 <b>Dad · ") and "👟 Steps" in caption
+    assert extra is None
+
+
+def test_workout_nudge_only_when_behind(svc):
+    service, profile, _, _ = svc
+    profile.goals = "3 workouts a week"
+    text = service.workout_nudge_text(profile)
+    assert text is None or text.startswith("🏃 <b>0 of 3 workouts this week</b>")
+    profile.goals = "walk more"
+    assert service.workout_nudge_text(profile) is None

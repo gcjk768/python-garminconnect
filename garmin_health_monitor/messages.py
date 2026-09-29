@@ -1167,6 +1167,7 @@ def heart_review(
     day: date,
     episodes: Sequence[Episode] | None,
     snap: DaySnapshot | None,
+    med_line: str | None = None,
 ) -> str:
     """❤️ 22:00 heart review: every possible palpitation today in one table."""
     tz = _tz(profile, snap)
@@ -1181,7 +1182,17 @@ def heart_review(
         parts.append(f"<i>{len(hidden)} more looked like exercise.</i>")
     if snap is not None and snap.summary.resting_hr:
         parts.append(f"Resting HR today: {_n(snap.summary.resting_hr, unit=' bpm')}")
+    if med_line:
+        parts.append(esc(med_line))
     return _assemble(parts)
+
+
+def med_reminder(profile: ProfileConfig, hhmm: str) -> str:
+    """💊 Reminder text; the bot adds the ✅ Taken button."""
+    return (
+        f"💊 <b>{esc(profile.medication.name or 'Medicine')}</b> · {esc(hhmm)} dose ({_name(profile)})\n"
+        "Tap ✅ when taken."
+    )
 
 
 def _frequency_summary(episodes: Sequence[Episode], days: int, tz: str) -> str | None:
@@ -1377,3 +1388,70 @@ __all__ = [
     "today_status",
     "weekly_review",
 ]
+
+
+# ---------------------------------------------------------------------------
+# Monthly summaries and nudges
+# ---------------------------------------------------------------------------
+
+
+def heart_month_caption(profile: ProfileConfig, title: str, counts: dict[date, int], medication: Any) -> str:
+    """Emoji caption under the heart calendar picture."""
+    many = sum(1 for n in counts.values() if n >= 2)
+    one = sum(1 for n in counts.values() if n == 1)
+    lines = [
+        f"❤️ <b>{_name(profile)}'s heart · {esc(title)}</b>",
+        f"🟥 {many} days: 2 or more episodes",
+        f"🟧 {one} days: 1 episode",
+        "🟩 other days: normal",
+    ]
+    if getattr(medication, "name", "") and getattr(medication, "started", None):
+        started = date.fromisoformat(medication.started)
+        after = sum(1 for d in counts if d > started)
+        lines.append(f"💊 {esc(medication.name)} from {started:%d %b}: " + ("none since" if not after else f"{after} days since"))
+    return "\n".join(lines)
+
+
+def heart_month_report_text(profile: ProfileConfig, title: str, report: dict[str, Any]) -> str:
+    """🧠 The AI's plain-English reading of the month (safety lines are fixed, not generated)."""
+    def bullets(items: Sequence[str]) -> str:
+        return "\n".join(f"• {esc(i)}" for i in items)
+
+    parts = [f"🧠 <b>{_name(profile)}'s heart · what {esc(title)} shows</b>"]
+    if report.get("summary"):
+        parts.append(f"<i>{esc(report['summary'])}</i>")
+    for head, key in (("🔍 <b>Why it may happen</b>", "why"), ("🌿 <b>Habits that may help</b>", "habits"),
+                      ("🩺 <b>Ask the doctor</b>", "ask_doctor")):
+        if report.get(key):
+            parts += ["", head, bullets(report[key])]
+    parts += ["", "🚨 Chest pain, fainting or bad breathlessness: call 995.",
+              "<i>AI reading of watch data, not medical advice. Keep taking medicine as the doctor says.</i>"]
+    return "\n".join(parts)
+
+
+def progress_caption(
+    profile: ProfileConfig,
+    title: str,
+    rows: Sequence[dict[str, Any]],
+    prev_rows: Sequence[dict[str, Any]],
+    fitness: dict[str, Any] | None,
+) -> str:
+    """📈 Short caption under the 30-day picture: this month vs the one before."""
+    steps, prev_steps = _row_avg(rows, "total_steps"), _row_avg(prev_rows, "total_steps")
+    rhr, prev_rhr = _row_avg(rows, "resting_hr"), _row_avg(prev_rows, "resting_hr")
+    workouts = sum(len(r.get("activities") or []) for r in rows)
+    lines = [f"📈 <b>{_name(profile)} · {esc(title)}</b>"]
+    lines.append(f"👟 Steps {_n(steps, sep=True)}/day" + (f" (before {_n(prev_steps, sep=True)})" if prev_steps else ""))
+    lines.append(f"❤️ Resting HR {_n(rhr, unit=' bpm')}" + (f" (before {_n(prev_rhr)})" if prev_rhr else ""))
+    lines.append(f"🏃 Workouts {workouts}")
+    lines.extend(line for line in fitness_lines(fitness)[1:2])  # the VO2 max / fitness age line only
+    return _assemble(_compact(lines))
+
+
+def workout_nudge(profile: ProfileConfig, done: int, goal: int, days_left: int) -> str:
+    """🏃 Mid-week nudge when behind the weekly workout goal."""
+    need = goal - done
+    return (
+        f"🏃 <b>{done} of {goal} workouts this week</b> ({_name(profile)})\n"
+        f"{need} more to go with {days_left} day{'s' if days_left != 1 else ''} left. Even 20 minutes counts."
+    )

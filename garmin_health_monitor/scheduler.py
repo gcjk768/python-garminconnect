@@ -61,6 +61,13 @@ class Scheduler:
             if p.features.weekly_review:
                 day = _WEEKDAYS.get(str(sched.weekly_review_day).lower()[:3], 0)
                 jq.run_daily(self.job_weekly, time=_at(sched.weekly_review_time, tz), days=(day,), data=p, name=f"weekly:{p.slug}")
+            if p.features.monthly_summary:
+                jq.run_monthly(self.job_monthly, when=_at(sched.monthly_summary_time, tz), day=int(sched.monthly_summary_day), data=p, name=f"monthly:{p.slug}")
+            if p.features.workout_nudge:
+                nudge_day = _WEEKDAYS.get(str(sched.workout_nudge_day).lower()[:3], 4)
+                jq.run_daily(self.job_workout_nudge, time=_at(sched.workout_nudge_time, tz), days=(nudge_day,), data=p, name=f"nudge:{p.slug}")
+            for hhmm in p.medication.times:
+                jq.run_daily(self.job_medication, time=_at(hhmm, tz), data=(p, hhmm), name=f"med:{p.slug}:{hhmm}")
             if p.features.doctor_report and p.features.palpitations:
                 jq.run_monthly(self.job_doctor_report, when=_at(sched.doctor_report_time, tz), day=int(sched.doctor_report_day_of_month), data=p, name=f"report:{p.slug}")
         logger.info("Scheduled jobs: %s", ", ".join(j.name or "?" for j in jq.jobs()))
@@ -109,6 +116,30 @@ class Scheduler:
     async def job_weekly(self, context: ContextTypes.DEFAULT_TYPE) -> None:
         p: ProfileConfig = context.job.data  # type: ignore[union-attr]
         await self._send_report_job(p, self.service.weekly_review_text, "weekly review")
+
+    async def job_monthly(self, context: ContextTypes.DEFAULT_TYPE) -> None:
+        p: ProfileConfig = context.job.data  # type: ignore[union-attr]
+        try:
+            png, caption, extra = await asyncio.to_thread(self.service.monthly_summary, p)
+            if png:
+                await self.bot.send_photo(p.telegram_chat_ids, png, caption, None, p)
+            else:
+                await self.bot.send_text(p.telegram_chat_ids, caption, None, p)
+            if extra:
+                await self.bot.send_text(p.telegram_chat_ids, extra, None, p)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("%s: monthly summary failed", p.name)
+            await self._notify_admins(f"⚠️ {messages.esc(p.name)}: monthly summary failed: {messages.esc(str(exc))}")
+
+    async def job_workout_nudge(self, context: ContextTypes.DEFAULT_TYPE) -> None:
+        p: ProfileConfig = context.job.data  # type: ignore[union-attr]
+        text = await asyncio.to_thread(self.service.workout_nudge_text, p)
+        if text:
+            await self.bot.send_text(p.telegram_chat_ids, text, None, p)
+
+    async def job_medication(self, context: ContextTypes.DEFAULT_TYPE) -> None:
+        p, hhmm = context.job.data  # type: ignore[union-attr]
+        await self.bot.send_med_reminder(p, hhmm, self.service.today(p))
 
     async def job_doctor_report(self, context: ContextTypes.DEFAULT_TYPE) -> None:
         p: ProfileConfig = context.job.data  # type: ignore[union-attr]

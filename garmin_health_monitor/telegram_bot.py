@@ -25,7 +25,7 @@ import re
 import threading
 from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -67,6 +67,7 @@ MAX_CAPTION_LEN = 1024
 MAX_CALLBACK_ANSWER_LEN = 200
 
 FELT_CALLBACK_RE = re.compile(r"^felt:(\d+):(yes|no)$")
+MED_CALLBACK_RE = re.compile(r"^med:([a-z0-9-]+):(\d{4}-\d{2}-\d{2}):(\d{4})$")
 _TIME_ARG_RE = re.compile(r"^(\d{1,2})[:.h](\d{2})$|^(\d{2})(\d{2})$")
 _TAG_RE = re.compile(r"<(/?)(b|i|u|s|code|pre|strong|em)>", re.IGNORECASE)
 
@@ -198,6 +199,12 @@ def _parse_days(args: Sequence[str], default: int, cap: int) -> int:
             continue
         return max(1, min(value, cap))
     return default
+
+
+def build_med_keyboard(profile_slug: str, day: date, hhmm: str) -> InlineKeyboardMarkup:
+    """Single "✅ Taken" button for a medicine reminder."""
+    data = f"med:{profile_slug}:{day.isoformat()}:{hhmm.replace(':', '')}"
+    return InlineKeyboardMarkup([[InlineKeyboardButton("✅ Taken", callback_data=data)]])
 
 
 def build_felt_keyboard(episode_id: int) -> InlineKeyboardMarkup:
@@ -349,6 +356,7 @@ class HealthBot:
         app.add_handler(CommandHandler("status", self.cmd_status))
         app.add_handler(CommandHandler("mfa", self.cmd_mfa))
         app.add_handler(CallbackQueryHandler(self.cb_felt, pattern=FELT_CALLBACK_RE))
+        app.add_handler(CallbackQueryHandler(self.cb_med, pattern=MED_CALLBACK_RE))
         app.add_handler(MessageHandler(filters.COMMAND, self.cmd_unknown))
         app.add_error_handler(self.on_error)
 
@@ -647,6 +655,11 @@ class HealthBot:
                 logger.error("send_document to %s failed: %s", cid, exc)
             except Exception:  # noqa: BLE001
                 logger.exception("send_document to %s failed", cid)
+
+    async def send_med_reminder(self, profile: ProfileConfig, hhmm: str, day: date) -> None:
+        """💊 Daily medicine reminder with a ✅ Taken button."""
+        chat_ids = list(profile.telegram_chat_ids) or list(self.config.telegram.admin_chat_ids)
+        await self.send_text(chat_ids, messages.med_reminder(profile, hhmm), build_med_keyboard(profile.slug, day, hhmm), profile)
 
     async def notify_episode(
         self, profile: ProfileConfig, episode: Episode, text: str, png: bytes | None
@@ -1065,6 +1078,27 @@ class HealthBot:
             logger.warning("callback answer failed: %s", exc)
         suffix = "✅ recorded: felt" if felt else "recorded: not noticed"
         await self._strip_buttons(query, suffix)
+
+    async def cb_med(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """✅ Taken on a medicine reminder: record it and replace the button with the time."""
+        query = getattr(update, "callback_query", None)
+        if query is None:
+            return
+        m = MED_CALLBACK_RE.match(str(getattr(query, "data", "") or ""))
+        profile = next((p for p in self.config.profiles if m and p.slug == m.group(1)), None)
+        if self._authorised_chat(update) is None or profile is None or self.service is None:
+            try:
+                await query.answer()
+            except TelegramError:
+                pass
+            return
+        hhmm = f"{m.group(3)[:2]}:{m.group(3)[2:]}"
+        at = await asyncio.to_thread(self.service.mark_med_taken, profile, date.fromisoformat(m.group(2)), hhmm)
+        try:
+            await query.answer(f"Recorded: taken at {at}")
+        except TelegramError as exc:
+            logger.warning("callback answer failed: %s", exc)
+        await self._strip_buttons(query, f"✅ taken at {at}")
 
     async def _strip_buttons(self, query: Any, suffix: str) -> None:
         """Remove the inline buttons from the alert and append ``suffix`` to its text/caption."""

@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 
 from .config import ProfileConfig
 from .models import Alert, DaySnapshot
+from .palpitations import annotate, estimate_interval
 from .utils import fmt_hm, now_utc, to_local
 
 logger = logging.getLogger(__name__)
@@ -160,4 +161,42 @@ def evaluate_alerts(
             )
         )
 
+    # Heart rate staying low while awake (e.g. on a beta blocker); threshold agreed with the doctor
+    if cfg.low_hr_below:
+        low = _low_hr_run(profile, snap, cfg.low_hr_below, cfg.low_hr_minutes)
+        if low is not None:
+            start, minutes, lowest = low
+            out.append(
+                Alert(
+                    key=_key("low_hr", profile.name, day),
+                    severity="warning",
+                    title="Heart rate stayed low while awake",
+                    body=(
+                        f"Under {cfg.low_hr_below} bpm for {minutes} min from {fmt_hm(start, profile.timezone)} "
+                        f"(lowest {lowest} bpm). If he feels dizzy, faint or unusually tired, call his doctor."
+                    ),
+                    profile=profile.name,
+                )
+            )
+
+    if cfg.only:
+        out = [a for a in out if a.key.split(":", 1)[0] in cfg.only]
     return out
+
+
+def _low_hr_run(profile: ProfileConfig, snap: DaySnapshot, below: int, minutes: int) -> tuple[datetime, int, int] | None:
+    """First awake run of samples under ``below`` lasting ``minutes``: (start, minutes, lowest bpm)."""
+    step = estimate_interval(snap.hr)
+    start: datetime | None = None
+    lowest = 0
+    for c in annotate(snap, profile.palpitations):
+        if c.hr < below and not c.asleep:
+            if start is None:
+                start, lowest = c.ts, c.hr
+            lowest = min(lowest, c.hr)
+            span = c.ts - start + step
+            if span >= timedelta(minutes=minutes):
+                return start, int(span.total_seconds() // 60), lowest
+        else:
+            start = None
+    return None

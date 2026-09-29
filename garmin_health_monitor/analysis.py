@@ -1382,3 +1382,91 @@ def episode_links(day_row: dict[str, Any] | None, usual_rows: list[dict[str, Any
     if bb is not None and bb <= 15:
         links.append(f"low energy (Body Battery down to {bb:.0f})")
     return " · ".join(links) or NO_LINKS
+
+
+# ---------------------------------------------------------------------------
+# Monthly heart report (LLM explains software-computed patterns; never diagnoses or prescribes)
+# ---------------------------------------------------------------------------
+
+MONTH_REPORT_SYSTEM = (
+    "You explain an older person's wrist-watch heart-rate log to them and their family, in very plain English. "
+    "You are not a doctor. Never name a disease or diagnosis. Never suggest medicines, supplements, or changing "
+    "any dose; only the doctor changes that. Use only the numbers given; software computed them and they are "
+    "correct; do not calculate new ones. Say 'may' and 'seems', never 'is caused by'. A pattern needs a clear "
+    "difference between episode days and normal days; otherwise leave it out. Garmin's stress score is computed "
+    "from heart rhythm, so a fast heart itself raises it: treat stress only as a possible link and say so briefly. "
+    "The tool only counts episodes while the person is still, so being at rest is not a finding. "
+    "Short sentences, no dashes, no jargon."
+)
+
+MONTH_REPORT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "summary": {"type": "string", "description": "1 or 2 short sentences"},
+        "why": {"type": "array", "maxItems": 3, "items": {"type": "string"},
+                "description": "patterns that may link to the episodes, each with the number that shows it"},
+        "habits": {"type": "array", "maxItems": 4, "items": {"type": "string"},
+                   "description": "safe everyday habits linked to those patterns (sleep, caffeine, alcohol, fluids, meals, stress, standing up slowly)"},
+        "ask_doctor": {"type": "array", "maxItems": 3, "items": {"type": "string"}},
+    },
+    "required": ["summary", "why", "habits", "ask_doctor"],
+}
+
+
+def heart_month_facts(
+    profile: ProfileConfig,
+    period: str,
+    episodes: list[Episode],
+    rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Every statistic the monthly report may quote, computed here (the model only interprets)."""
+    tz = _tz(profile)
+    days = {d["day"]: d for d in (compact_day(r) for r in rows)}
+    ep_days = {to_local(e.start, tz).date().isoformat() for e in episodes}
+
+    def avg(key: str, on_episode_days: bool) -> float | None:
+        vals = [d[key] for k, d in days.items() if (k in ep_days) == on_episode_days and d.get(key) is not None]
+        return round(mean(vals), 1) if vals else None
+
+    def band(h: int) -> str:
+        return "morning" if 6 <= h < 12 else "afternoon" if 12 <= h < 18 else "evening" if 18 <= h < 23 else "night"
+
+    med = profile.medication
+    return {
+        "person": profile.persona or profile.name,
+        "medication": (f"{med.name}, prescribed by the doctor" + (f", started {med.started}" if med.started else ""))
+        if med.name else None,
+        "period": period,
+        "episodes_total": len(episodes),
+        "days_with_episodes": len(ep_days),
+        "days_with_data": len(days),
+        "by_time_of_day": dict(Counter(band(to_local(e.start, tz).hour) for e in episodes)),
+        "while_asleep": sum(bool(e.asleep) for e in episodes),
+        "median_minutes": sorted(round(e.duration_min) for e in episodes)[len(episodes) // 2] if episodes else None,
+        "highest_peak_bpm": max((e.peak_hr for e in episodes), default=None),
+        "compare_episode_days_vs_normal_days": {
+            k: {"episode_days": avg(k, True), "normal_days": avg(k, False)}
+            for k in ("sleep_h", "sleep_score", "stress_avg", "high_stress_min", "steps", "body_battery_low")
+        },
+    }
+
+
+def heart_month_report(client: Any, facts: dict[str, Any]) -> dict[str, Any]:
+    """Claude's plain-English reading of :func:`heart_month_facts` (raises LLMError on failure)."""
+    data = client.chat_json(MONTH_REPORT_SYSTEM, "Data (JSON):\n" + _dumps(facts), MONTH_REPORT_SCHEMA)
+    data = data if isinstance(data, dict) else {}
+    return {
+        "summary": _clean_str(data.get("summary"), 400),
+        "why": _clean_list(data.get("why"), 3),
+        "habits": _clean_list(data.get("habits"), 4),
+        "ask_doctor": _clean_list(data.get("ask_doctor"), 3),
+    }
+
+
+_WORKOUT_GOAL_RE = re.compile(r"(\d+)\s*(?:x|times|workouts?|sessions?|runs?)\s*(?:a|per)\s*week", re.IGNORECASE)
+
+
+def parse_workout_goal(goals: str | None) -> int | None:
+    """``"3 workouts a week"`` -> 3 (``None`` when the goals text has no weekly workout target)."""
+    m = _WORKOUT_GOAL_RE.search(goals or "")
+    return int(m.group(1)) if m else None
