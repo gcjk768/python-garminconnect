@@ -470,7 +470,10 @@ class MonitorService:
                 doctor_note=ep.doctor_note or "",
                 model=ep.llm_model or "",
             )
-        text = messages.episode_alert(profile, ep, assessment)
+        day = to_local(ep.start, profile.timezone).date()
+        usual = self.rows(profile, 14, end=day - timedelta(days=1))
+        links = analysis.episode_links(self.storage.get_snapshot_row(profile.name, day), usual)
+        text = messages.episode_alert(profile, ep, assessment, links)
         png: bytes | None = None
         try:
             samples = self.storage.get_hr_samples(profile.name, ep.start - timedelta(minutes=45), ep.end + timedelta(minutes=45))

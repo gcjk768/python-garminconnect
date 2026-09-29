@@ -1097,7 +1097,12 @@ def steps_message(profile: ProfileConfig, snap: DaySnapshot, rows_7d: Sequence[d
 # ---------------------------------------------------------------------------
 
 
-def episode_alert(profile: ProfileConfig, ep: Episode, assessment: EpisodeAssessment | None) -> str:
+ALERT_TIP = "🌿 Now: sit down, breathe slowly, sip water. Note any coffee or alcohol today."
+
+
+def episode_alert(
+    profile: ProfileConfig, ep: Episode, assessment: EpisodeAssessment | None, links: str | None = None
+) -> str:
     """❤️ Short alert for one possible palpitation: date, time, heart rate (buttons added by the bot)."""
     tz = _tz(profile)
     code = assessment.assessment if assessment is not None else ep.llm_assessment
@@ -1110,6 +1115,9 @@ def episode_alert(profile: ProfileConfig, ep: Episode, assessment: EpisodeAssess
     ]
     if code:
         parts.append(f"🤖 AI view: {_assessment_label(code)}")
+    if links:
+        parts.append(f"🔍 Possible links: {esc(links)}")
+        parts.append(ALERT_TIP)
     parts.append("<b>Was it felt?</b> Tap below.")
     parts.append(NOT_DIAGNOSIS)
     return _assemble(parts)

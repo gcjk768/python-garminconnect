@@ -1346,3 +1346,39 @@ def rule_based_narrative(
     )
     sentences.append("This is a symptom diary to support the consultation, not a diagnosis.")
     return " ".join(sentences)
+
+
+# ---------------------------------------------------------------------------
+# Possible links for an alert (software rules, no LLM: always available, never invents)
+# ---------------------------------------------------------------------------
+
+NO_LINKS = "nothing unusual in sleep or stress today"
+
+
+def episode_links(day_row: dict[str, Any] | None, usual_rows: list[dict[str, Any]]) -> str:
+    """Compare the episode's day with his usual (the days before): sleep, stress, energy.
+
+    These are the factors that differed on episode days in his own history. Returned text is
+    short and hedged by the caller ("Possible links: ..."); nothing here is a cause.
+    """
+    day = compact_day(day_row) if day_row else {}
+    usual = [compact_day(r) for r in usual_rows]
+
+    def typical(key: str) -> float | None:
+        vals = [u[key] for u in usual if u.get(key) is not None]
+        return median(vals) if len(vals) >= 3 else None
+
+    links: list[str] = []
+    h, uh = day.get("sleep_h"), typical("sleep_h")
+    score, uscore = day.get("sleep_score"), typical("sleep_score")
+    if h is not None and uh is not None and h <= uh - 1:
+        links.append(f"short sleep last night ({h:.1f} h, usual {uh:.1f})")
+    elif score is not None and uscore is not None and score <= uscore - 10:
+        links.append(f"poor sleep last night (score {score:.0f}, usual {uscore:.0f})")
+    hs, uhs = day.get("high_stress_min"), typical("high_stress_min")
+    if hs is not None and hs >= 60 and (uhs is None or hs >= 2 * uhs):
+        links.append(f"stressful day ({hs:.0f} min high stress" + (f", usual {uhs:.0f})" if uhs is not None else ")"))
+    bb = day.get("body_battery_low")
+    if bb is not None and bb <= 15:
+        links.append(f"low energy (Body Battery down to {bb:.0f})")
+    return " · ".join(links) or NO_LINKS

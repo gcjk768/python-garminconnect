@@ -619,3 +619,24 @@ def test_fitness_lines_from_real_garmin_shapes():
     assert "this week 0/150 · last week 108" in text  # 18 + 2*45
     assert "5K 26:48" in text and "Half 2:14:21" in text and "Full 5:04:59" in text
     assert M.fitness_lines(None) == [] and M.fitness_lines({"training_status": {}}) == []
+
+
+def test_episode_links_compares_with_his_usual():
+    from garmin_health_monitor.analysis import NO_LINKS, episode_links
+
+    usual = [_row(DAY - timedelta(days=i), high_stress_seconds=20 * 60, body_battery_low=30) for i in range(1, 8)]
+    bad = _row(DAY, sleep_seconds=int(4.1 * 3600), high_stress_seconds=250 * 60, body_battery_low=5)
+    text = episode_links(bad, usual)
+    assert "short sleep last night (4.1 h, usual 7.0)" in text
+    assert "stressful day (250 min high stress, usual 20)" in text
+    assert "low energy (Body Battery down to 5)" in text
+    assert episode_links(_row(DAY, high_stress_seconds=20 * 60, body_battery_low=30), usual) == NO_LINKS
+    assert episode_links(None, []) == NO_LINKS
+
+
+def test_episode_alert_shows_links_and_tip(profile, episodes):
+    text = M.episode_alert(profile, episodes[0], None, "short sleep last night (4.1 h, usual 7.8)")
+    assert "🔍 Possible links: short sleep last night (4.1 h, usual 7.8)" in text
+    assert M.ALERT_TIP in text
+    assert "Possible links" not in M.episode_alert(profile, episodes[0], None)
+    _assert_valid_html(text)
