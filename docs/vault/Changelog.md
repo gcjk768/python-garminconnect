@@ -1,8 +1,12 @@
 ---
 tags: [active]
-updated: 2026-09-29
+updated: 2026-09-30
 ---
 # Changelog
+
+## 2026-09-30 — README + architecture diagram
+- New `README.md` (problem, engineering highlights, flow, stack, setup, limits; no real readings or names).
+- `docs/architecture.drawio` (editable) + exported `docs/architecture.drawio.svg` / `docs/architecture.png`.
 
 ## 2026-09-29 — Safety + routine features ("do all")
 - Dad alerts: `alerts.only: [no_sync, low_hr, garmin_abnormal_hr]`; watch not synced 6h; low HR < 40 bpm for 10 min awake (PLACEHOLDER, confirm with doctor; backtest on Sept: 0 days).

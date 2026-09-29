@@ -1,6 +1,6 @@
 ---
 tags: [active]
-updated: 2026-09-29
+updated: 2026-09-30
 ---
 # App Overview
 
@@ -14,3 +14,4 @@ Telegram bot + scheduler on the NAS that pulls Garmin data for the family, detec
 - Deploy: `Dockerfile`, `docker-compose.yaml` → NAS `/volume1/docker/garmin-monitor` (Dockge). Secrets in that folder's `.env`: HEART_BOT_TOKEN, HEART_ADMIN_CHAT, MY_GARMIN_*, CLAUDE_CODE_OAUTH_TOKEN.
 - Output format: `garmin_health_monitor/messages.py::_compact` hides n/a; `coaching_block` is the short card.
 - Dad: NAS stack `dad-heart-monitor` (config in its `config/config.yaml`, heart-only features); vault log via `garmin_health_monitor/vault.py`.
+- Docs: `README.md` (public overview) and `docs/architecture.drawio` (diagram source; export to `docs/architecture.drawio.svg`).
