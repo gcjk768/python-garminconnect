@@ -192,3 +192,13 @@ def test_episode_histograms_hours_are_local(episode_day):
 def test_episode_histograms_empty():
     assert _is_png(charts.episode_histograms([], TZ))
     assert _is_png(charts.episode_histograms(None, TZ))
+
+
+def test_heart_calendar_renders_png():
+    from datetime import date
+
+    png = charts.heart_calendar(
+        2026, 9, {date(2026, 9, 20): 4, date(2026, 9, 1): 1}, {date(2026, 9, d) for d in range(1, 29)},
+        "Dad's heart · September 2026", marker=(date(2026, 9, 27), "Medicine"),
+    )
+    assert png[:8] == charts.PNG_SIGNATURE and len(png) > 10_000

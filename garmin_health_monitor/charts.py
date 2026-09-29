@@ -669,3 +669,62 @@ def episode_histograms(
                 ax.cla()
                 no_data(ax, "Chart could not be drawn")
         return _png(fig)
+
+
+# ---------------------------------------------------------------------------
+# Month calendar: one coloured square per day, easy to read for an older person
+# ---------------------------------------------------------------------------
+
+CAL_NONE = "#cdeedd"  # soft green: a normal day
+CAL_ONE = "#f6b26b"  # orange: 1 episode
+CAL_MANY = "#e34948"  # red: 2 or more
+CAL_EMPTY = "#f1f0ec"  # no data yet / future
+
+
+def heart_calendar(
+    year: int,
+    month: int,
+    counts: dict[date, int],
+    has_data: set[date],
+    title: str,
+    marker: tuple[date, str] | None = None,
+) -> bytes:
+    """PNG month calendar: big day squares coloured by episode count, count printed large.
+
+    ``marker`` outlines one day and writes a short label under its number (e.g. a medicine start).
+    """
+    import calendar
+
+    weeks = calendar.Calendar(firstweekday=0).monthdatescalendar(year, month)
+    with chart_style():
+        fig, ax = plt.subplots(figsize=(7, 1.2 + 1.05 * len(weeks)))
+        ax.set_xlim(0, 7)
+        ax.set_ylim(len(weeks) + 0.6, 0)
+        ax.axis("off")
+        for col, name in enumerate(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]):
+            ax.text(col + 0.5, 0.25, name, ha="center", va="center", fontsize=13, color=INK2, fontweight="bold")
+        for row, week in enumerate(weeks, start=1):
+            for col, d in enumerate(week):
+                if d.month != month:
+                    continue
+                n = counts.get(d, 0)
+                colour = CAL_EMPTY if d not in has_data else CAL_MANY if n >= 2 else CAL_ONE if n == 1 else CAL_NONE
+                edge, lw = (VIOLET, 3.0) if marker and marker[0] == d else ("white", 2.0)
+                ax.add_patch(plt.Rectangle((col + 0.04, row - 0.46), 0.92, 0.92,
+                                           facecolor=colour, edgecolor=edge, linewidth=lw))
+                ax.text(col + 0.12, row - 0.33, str(d.day), ha="left", va="center", fontsize=11, color=INK2)
+                if n:
+                    ax.text(col + 0.5, row + 0.05, str(n), ha="center", va="center", fontsize=24,
+                            fontweight="bold", color="white" if n >= 2 else INK)
+                if marker and marker[0] == d:
+                    ax.text(col + 0.5, row + 0.34, marker[1], ha="center", va="center", fontsize=8.5,
+                            color=VIOLET, fontweight="bold")
+        ax.set_title(title, fontsize=17, loc="left", pad=14)
+        legend = [
+            Patch(facecolor=CAL_NONE, label="Normal day"),
+            Patch(facecolor=CAL_ONE, label="1 fast-heartbeat episode"),
+            Patch(facecolor=CAL_MANY, label="2 or more"),
+        ]
+        ax.legend(handles=legend, loc="upper center", bbox_to_anchor=(0.5, 0.0), ncol=3, fontsize=11,
+                  handlelength=1.4, handleheight=1.4, frameon=False)
+        return _png(fig)
