@@ -24,6 +24,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+OUTAGE_ALERT_AFTER = timedelta(hours=2)  # Garmin blips (e.g. HTTP 521) usually clear well within this
+
 _WEEKDAYS = {"sun": 0, "mon": 1, "tue": 2, "wed": 3, "thu": 4, "fri": 5, "sat": 6}  # PTB: 0 = Sunday
 
 
@@ -38,6 +40,8 @@ class Scheduler:
         self.service = service
         self.bot = bot
         self._busy: set[str] = set()
+        self._down_since: dict[str, datetime] = {}  # profile -> first failed poll of the current outage
+        self._down_alerted: set[str] = set()
 
     # ------------------------------------------------------------ registration
 
@@ -90,7 +94,7 @@ class Scheduler:
                 await self.deliver(p, result)
             except Exception as exc:  # noqa: BLE001
                 logger.exception("%s: poll job failed", p.name)
-                await self._notify_admins_once(f"poll_error:{p.slug}:{datetime.now():%Y-%m-%d}", f"⚠️ {messages.esc(p.name)}: poll failed: {messages.esc(str(exc))}")
+                await self._poll_failed(p, str(exc))
             finally:
                 self._busy.discard(p.name)
 
@@ -130,8 +134,9 @@ class Scheduler:
     async def deliver(self, p: ProfileConfig, result: PollResult) -> None:
         """Send episode alerts and rule alerts from a poll result (respecting quiet hours)."""
         if result.error:
-            await self._notify_admins_once(f"poll_error:{p.slug}:{datetime.now():%Y-%m-%d}", f"⚠️ {messages.esc(p.name)}: {messages.esc(result.error)}")
+            await self._poll_failed(p, result.error)
             return
+        await self._poll_ok(p)
         quiet = self.service.in_quiet_hours(p)
         for ep in result.to_notify:
             if quiet and not self._is_critical_episode(p, ep):
@@ -159,13 +164,32 @@ class Scheduler:
     def _is_critical_episode(p: ProfileConfig, ep: Episode) -> bool:
         return ep.peak_hr >= max(140, p.palpitations.spike_hr_threshold + 20) and ep.duration_min >= 10
 
+    async def _poll_failed(self, p: ProfileConfig, error: str) -> None:
+        """Alert once, only if Garmin has been failing for OUTAGE_ALERT_AFTER (short blips stay silent)."""
+        now = self.service.clock()
+        since = self._down_since.setdefault(p.name, now)
+        logger.warning("%s: Garmin poll failed (down since %s): %s", p.name, since, error)
+        if p.name in self._down_alerted or now - since < OUTAGE_ALERT_AFTER:
+            return
+        self._down_alerted.add(p.name)
+        hours = (now - since).total_seconds() / 3600
+        tz = p.timezone or self.config.timezone
+        if "login" in error.lower():
+            why = "Garmin login is failing. If this lasts, run <code>garmin-monitor login</code> for this profile."
+        else:
+            why = "Garmin's servers seem to be down."
+        await self._notify_admins(
+            f"⚠️ <b>{messages.esc(p.name)}: no Garmin data since {since.astimezone(get_tz(tz)):%H:%M}</b> "
+            f"({hours:.0f}h)\n{why}\nAlerts are paused until it is back."
+        )
+
+    async def _poll_ok(self, p: ProfileConfig) -> None:
+        since = self._down_since.pop(p.name, None)
+        if since is not None and p.name in self._down_alerted:
+            self._down_alerted.discard(p.name)
+            await self._notify_admins(f"✅ <b>{messages.esc(p.name)}: Garmin data is back.</b> Nothing lost; missed episodes are checked now.")
+
     async def _notify_admins(self, text: str) -> None:
         ids = self.config.telegram.admin_chat_ids
         if ids:
             await self.bot.send_text(ids, text)
-
-    async def _notify_admins_once(self, key: str, text: str) -> None:
-        if self.service.storage.notification_sent(key):
-            return
-        await self._notify_admins(text)
-        self.service.storage.mark_notification(key)

@@ -286,15 +286,34 @@ async def test_scheduler_quiet_hours_hold_non_critical(svc):
         assert service.storage.get_episode(ep.id).notified_at is None
 
 
-async def test_scheduler_poll_error_notifies_admins_once(svc):
+async def test_scheduler_garmin_outage_alerts_after_2h_once_then_all_clear(svc):
+    service, profile, _, clock = svc
+    bot = FakeBot()
+    sched = Scheduler(service.config, service, bot)
+    down = PollResult(profile="Dad", snapshot=None, error="All Garmin endpoints failed: API Error 521")
+    start = clock["now"]
+    await sched.deliver(profile, down)
+    clock["now"] = start + timedelta(minutes=90)
+    await sched.deliver(profile, down)
+    assert bot.send_text.await_count == 0  # a short blip stays silent
+    clock["now"] = start + timedelta(hours=2)
+    await sched.deliver(profile, down)
+    await sched.deliver(profile, down)
+    assert bot.send_text.await_count == 1  # alerted once
+    text = bot.send_text.await_args.args[1]
+    assert "no Garmin data since" in text and "servers seem to be down" in text
+    assert bot.send_text.await_args.args[0] == service.config.telegram.admin_chat_ids
+    await sched.deliver(profile, PollResult(profile="Dad", snapshot=None))
+    assert "Garmin data is back" in bot.send_text.await_args.args[1]
+
+
+async def test_scheduler_blip_that_recovers_sends_nothing(svc):
     service, profile, _, _ = svc
     bot = FakeBot()
     sched = Scheduler(service.config, service, bot)
-    res = PollResult(profile="Dad", snapshot=None, error="Garmin login needed")
-    await sched.deliver(profile, res)
-    await sched.deliver(profile, res)
-    assert bot.send_text.await_count == 1
-    assert bot.send_text.await_args.args[0] == service.config.telegram.admin_chat_ids
+    await sched.deliver(profile, PollResult(profile="Dad", snapshot=None, error="Garmin login needed: JWT_WEB"))
+    await sched.deliver(profile, PollResult(profile="Dad", snapshot=None))
+    assert bot.send_text.await_count == 0
 
 
 def test_log_symptom_extracts_fields_and_flags_red_flags(svc):
