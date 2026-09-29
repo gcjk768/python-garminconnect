@@ -396,6 +396,9 @@ class MonitorService:
         prev_week = self.rows(profile, 7, end=today - timedelta(days=7))
         start, end = self.day_range_utc(profile, today - timedelta(days=6), today)
         episodes = self.storage.get_episodes(profile.name, start, end) if profile.features.palpitations else []
+        if profile.features.heart_review:  # heart-only profile: the week's palpitation table
+            first = today - timedelta(days=6)
+            return messages.heart_month(profile, f"Week {first:%d %b} – {today:%d %b}", episodes)
         coaching: CoachingAdvice | None = None
         if self.llm is not None and profile.features.daily_coaching:
             try:

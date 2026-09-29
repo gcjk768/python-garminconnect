@@ -330,3 +330,12 @@ def test_poll_logs_episodes_to_obsidian_vault(svc, tmp_path):
     assert f"[[{DAY.isoformat()}]]" in home
     service.poll(profile)  # re-run rewrites, never duplicates
     assert note.read_text(encoding="utf-8").count("| at rest |") == text.count("| at rest |")
+
+
+def test_heart_only_profile_weekly_is_palpitation_table(svc):
+    service, profile, _, _ = svc
+    service.poll(profile)
+    profile.features.heart_review = True
+    text = service.weekly_review_text(profile)
+    assert text.startswith("❤️ <b>Dad · Week ") and "<pre>Date    Time   Peak  Min" in text
+    assert "Coaching" not in text
