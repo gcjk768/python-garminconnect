@@ -4,6 +4,11 @@ updated: 2026-09-29
 ---
 # Changelog
 
+## 2026-09-29 — Garmin outage handling
+- 10:17 Garmin HTTP 521 outage fired raw error dumps + a misleading "run login" on the first failed poll; both stacks recovered by themselves (tokens fine).
+- Now: failures are remembered; one plain alert only after 2h (login vs servers down); "✅ data is back" on recovery.
+- Recovery re-checks earlier days the outage covered (an outage past midnight used to skip the end of the previous day).
+
 ## 2026-09-29 — Dad: tables + weekly summary
 - Heart review (22:00) and monthly/weekly summaries use one aligned `<pre>` table (date, time, peak, minutes); only AI-ruled-out episodes hidden.
 - Dad weekly summary every Sunday 22:00 (`weekly_review_text` returns `heart_month` for heart-only profiles).
