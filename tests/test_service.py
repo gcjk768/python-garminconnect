@@ -358,3 +358,15 @@ def test_heart_only_profile_weekly_is_palpitation_table(svc):
     text = service.weekly_review_text(profile)
     assert text.startswith("❤️ <b>Dad · Week ") and "<pre>Date    Time   Peak  Min" in text
     assert "Coaching" not in text
+
+
+async def test_outage_past_midnight_rechecks_previous_day_on_recovery(svc):
+    service, profile, sessions, clock = svc
+    bot = FakeBot()
+    sched = Scheduler(service.config, service, bot)
+    clock["now"] = local(DAY - timedelta(days=1), 22, 0)
+    await sched.deliver(profile, PollResult(profile="Dad", snapshot=None, error="API Error 521"))
+    clock["now"] = local(DAY, 1, 0)
+    service.session(profile)  # the fake Garmin comes back
+    await sched.deliver(profile, PollResult(profile="Dad", snapshot=None))
+    assert (DAY - timedelta(days=1), False) in sessions[profile.name].calls  # yesterday re-read in full

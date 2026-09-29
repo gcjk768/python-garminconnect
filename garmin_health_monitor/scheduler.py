@@ -184,8 +184,19 @@ class Scheduler:
         )
 
     async def _poll_ok(self, p: ProfileConfig) -> None:
+        """Garmin is reachable again: catch up on earlier days the outage covered, then all-clear."""
         since = self._down_since.pop(p.name, None)
-        if since is not None and p.name in self._down_alerted:
+        if since is None:
+            return
+        # Today's poll re-reads the whole day; an outage past midnight would skip the end of the
+        # previous day(s), so re-check those too and alert on anything found.
+        day = since.astimezone(get_tz(p.timezone or self.config.timezone)).date()
+        while day < self.service.today(p):
+            res = await asyncio.to_thread(self.service.poll, p, day, False)
+            for ep in [] if res.error else res.to_notify:
+                await self.notify_episode(p, ep)
+            day += timedelta(days=1)
+        if p.name in self._down_alerted:
             self._down_alerted.discard(p.name)
             await self._notify_admins(f"✅ <b>{messages.esc(p.name)}: Garmin data is back.</b> Nothing lost; missed episodes are checked now.")
 
