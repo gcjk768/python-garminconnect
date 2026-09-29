@@ -4,6 +4,12 @@ updated: 2026-09-29
 ---
 # Changelog
 
+## 2026-09-29 — Dad's heart tracker live
+- Second NAS stack `dad-heart-monitor` (same image + mounted code as `garmin-monitor`), bot @koh_dad_heart_bot "Dad Heart Tracker" → James Channel topic 2677 "Dad Garmin Tracker".
+- Features: instant palpitation alert (date, time, peak/before HR, state, AI view) + 22:00 heart review (`features.heart_review`). Nothing else.
+- Thresholds tuned for Dad's resting HR ~42: rise_over_baseline 50, max_steps_in_window 60, alert_min_confidence 0.5, quiet hours 23 to 07.
+- Obsidian vault `/volume1/James/Obsidian/Dad Heart` (`vault_dir`), backfilled with September: 18 flagged (12 possible, 4 unclear, 2 exertion).
+
 ## 2026-09-29 — Fitness section + schedule
 - `GarminSession.fetch_fitness`: VO2 max, training status + load balance, fitness age, weekly intensity minutes, race predictions (once per message, not every poll; falls back to yesterday's training status until Garmin processes today).
 - `messages.fitness_lines` → 💪 Fitness in the evening summary only (removed from morning brief at James's request).
