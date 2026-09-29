@@ -408,16 +408,25 @@ def test_episode_alert_nocturnal_context(profile):
 
 def test_heart_review_lists_time_and_heart_rate(profile, episodes, episode_day):
     text = M.heart_review(profile, episode_day.day, episodes, episode_day)
-    assert text.startswith("❤️ <b>Heart review — Dad</b>")
-    assert f"Possible palpitations today: {len(episodes)}" in text
-    assert "🕒 10:00–10:08 · 💓 peak <b>127 bpm</b> (before 64) · at rest" in text
-    assert "Coaching" not in text and "Fitness" not in text
+    assert text.startswith("❤️ <b>Dad · Sun 27 Sep</b>")
+    assert "<pre>Time   Peak  Min\n10:00   127    8" in text  # time + heart rate, aligned
+    assert "Coaching" not in text and "Fitness" not in text and "n/a" not in text
     _assert_valid_html(text)
 
 
 def test_heart_review_quiet_day(profile, episode_day):
     text = M.heart_review(profile, episode_day.day, [], episode_day)
     assert "No possible palpitations today." in text
+    _assert_valid_html(text)
+
+
+def test_heart_month_hides_only_ruled_out_episodes(profile, episodes):
+    episodes[1].llm_assessment = ASSESSMENT_EXERTION
+    episodes[0].llm_assessment = None  # not assessed yet (no LLM): still shown
+    text = M.heart_month(profile, "September 2026", episodes)
+    assert "<b>1</b> possible palpitations on <b>1</b> days" in text
+    assert "Date    Time   Peak  Min\n27 Sep  10:00   127    8" in text
+    assert "1 more looked like exercise" in text
     _assert_valid_html(text)
 
 

@@ -1115,31 +1115,65 @@ def episode_alert(profile: ProfileConfig, ep: Episode, assessment: EpisodeAssess
     return _assemble(parts)
 
 
+_NOT_PALPITATION = {"likely_exertion", "likely_artifact"}
+
+
+def _heart_split(episodes: Sequence[Episode] | None) -> tuple[list[Episode], list[Episode]]:
+    """(shown, hidden): hide only what the AI ruled out, so unassessed episodes still show."""
+    eps = sorted(episodes or [], key=lambda e: e.start)
+    return [e for e in eps if e.llm_assessment not in _NOT_PALPITATION], [
+        e for e in eps if e.llm_assessment in _NOT_PALPITATION
+    ]
+
+
+def heart_table(episodes: Sequence[Episode], tz: str, with_date: bool = True) -> str:
+    """Aligned monospace table: date, start time, peak bpm, minutes (+ 'asleep')."""
+    head = ("Date    " if with_date else "") + "Time   Peak  Min"
+    rows = [head]
+    for e in episodes:
+        s = to_local(e.start, tz)
+        row = (f"{s:%d %b}  " if with_date else "") + f"{s:%H:%M}  {e.peak_hr:>4}  {round(e.duration_min):>3}"
+        rows.append(row + ("  asleep" if e.asleep else ""))
+    return "<pre>" + esc("\n".join(rows)) + "</pre>"
+
+
+def heart_month(profile: ProfileConfig, title: str, episodes: Sequence[Episode] | None) -> str:
+    """❤️ Monthly list of possible palpitations as one clean table."""
+    tz = _tz(profile)
+    shown, hidden = _heart_split(episodes)
+    days = len({to_local(e.start, tz).date() for e in shown})
+    parts: list[str | None] = [f"❤️ <b>{_name(profile)} · {esc(title)}</b>"]
+    if shown:
+        parts.append(f"<b>{len(shown)}</b> possible palpitations on <b>{days}</b> days")
+        parts.append(heart_table(shown, tz))
+        parts.append("Peak = highest bpm · Min = minutes")
+    else:
+        parts.append("✅ No possible palpitations.")
+    if hidden:
+        parts.append(f"<i>{len(hidden)} more looked like exercise (in Obsidian).</i>")
+    return _assemble(parts)
+
+
 def heart_review(
     profile: ProfileConfig,
     day: date,
     episodes: Sequence[Episode] | None,
     snap: DaySnapshot | None,
 ) -> str:
-    """❤️ 22:00 heart review: every possible palpitation today with time and heart rate."""
+    """❤️ 22:00 heart review: every possible palpitation today in one table."""
     tz = _tz(profile, snap)
-    eps = sorted(episodes or [], key=lambda e: e.start)
-    parts: list[str | None] = [f"❤️ <b>Heart review — {_name(profile)}</b> — {_day_label(day)}", ""]
-    if eps:
-        parts.append(f"<b>Possible palpitations today: {len(eps)}</b>")
-        parts.extend(
-            f"• 🕒 {_time_range(e.start, e.end, tz)} · 💓 peak <b>{_n(e.peak_hr, unit=' bpm')}</b> "
-            f"(before {_n(e.baseline_hr)}) · {'asleep' if e.asleep else 'at rest'}"
-            for e in eps
-        )
+    shown, hidden = _heart_split(episodes)
+    parts: list[str | None] = [f"❤️ <b>{_name(profile)} · {_day_label(day)}</b>"]
+    if shown:
+        parts.append(f"<b>{len(shown)}</b> possible palpitation{'s' if len(shown) != 1 else ''} today")
+        parts.append(heart_table(shown, tz, with_date=False))
     else:
         parts.append("✅ No possible palpitations today.")
-    if snap is not None:
-        s = snap.summary
-        parts.append("")
-        parts.append(f"Resting HR {_n(s.resting_hr, unit=' bpm')} · highest today {_n(s.max_hr, unit=' bpm')}")
-    parts.append(NOT_DIAGNOSIS)
-    return _assemble(_compact(parts))
+    if hidden:
+        parts.append(f"<i>{len(hidden)} more looked like exercise.</i>")
+    if snap is not None and snap.summary.resting_hr:
+        parts.append(f"Resting HR today: {_n(snap.summary.resting_hr, unit=' bpm')}")
+    return _assemble(parts)
 
 
 def _frequency_summary(episodes: Sequence[Episode], days: int, tz: str) -> str | None:
