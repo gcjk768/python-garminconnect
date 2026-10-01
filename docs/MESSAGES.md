@@ -4,6 +4,10 @@ Everything the monitor sends to Telegram is rendered by `garmin_health_monitor/m
 This page lists every message type, when it is sent, what it contains and a realistic example,
 so you know what to expect on your phone before you deploy it on the NAS.
 
+> **Layout (2026-10-01):** messages now use the HTML card style — `emoji <b>TITLE</b> · name · date`
+> header, blank-line blocks, a `━━━━━━━━━━━━━━━━` divider and coaching/fitness collapsed in an
+> expandable quote at the end. The examples below show the same fields in the older layout.
+
 ## Conventions
 
 | Convention | Meaning |

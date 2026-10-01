@@ -1,7 +1,9 @@
 """Telegram message rendering.
 
-Every function here returns a string for Telegram's **HTML parse mode**.  Only
-``<b>``, ``<i>``, ``<code>``, ``<pre>`` and ``<a href>`` are used, and every
+Every function here returns a string for Telegram's **HTML parse mode** in the
+"card" layout (:func:`header`, blank-line blocks, :data:`DIVIDER`, :func:`background`).
+Only ``<b>``, ``<i>``, ``<code>``, ``<pre>``, ``<a href>`` and
+``<blockquote expandable>`` are used, and every
 dynamic value (names, notes, model output, Garmin strings) goes through
 :func:`esc` so a stray ``<`` in a note can never break a message.
 
@@ -81,6 +83,38 @@ SOURCE_LABELS: dict[str, str] = {
 
 SEVERITY_EMOJI: dict[str, str] = {"info": "ℹ️", "warning": "⚠️", "critical": "🚨"}
 
+DIVIDER = "━━━━━━━━━━━━━━━━"
+"""Section divider between major groups (the Telegram card style)."""
+
+#: One fixed emoji per message type; every message starts with ``header(kind, ...)``.
+SECTION_TITLES: dict[str, str] = {
+    "morning": "🌅",
+    "evening": "🌙",
+    "weekly": "📊",
+    "today": "📍",
+    "sleep": "😴",
+    "hr": "❤️",
+    "steps": "👟",
+    "episode": "❤️",
+    "heart": "❤️",
+    "heart_ai": "🧠",
+    "med": "💊",
+    "diary": "🩺",
+    "doctor": "🩺",
+    "symptom": "📝",
+    "help": "🤖",
+    "hello": "👋",
+    "profiles": "👥",
+    "status": "🛠",
+    "mfa": "🔐",
+    "progress": "📈",
+    "nudge": "🏃",
+    "analysis": "🧠",
+    "warning": "⚠️",
+    "ok": "✅",
+    "busy": "⏳",
+}
+
 NOT_DIAGNOSIS = (
     "<i>Wrist-sensor heart-rate readings for a symptom diary, not a diagnosis. "
     "Seek urgent care for chest pain, fainting or breathlessness.</i>"
@@ -97,6 +131,34 @@ def esc(text: Any) -> str:
     if text is None:
         return NA
     return html.escape(str(text), quote=False)
+
+
+def header(kind: str, title: Any, *subtitle: Any) -> str:
+    """``emoji <b>TITLE</b> · sub · sub`` — the first line of every message (all values escaped here)."""
+    subs = "".join(f" · {esc(s)}" for s in subtitle if s)
+    return f"{SECTION_TITLES[kind]} <b>{esc(str(title).upper())}</b>{subs}"
+
+
+def background(*sections: str | None) -> str | None:
+    """Divider + collapsed ``<blockquote expandable>`` holding secondary detail (``None`` when empty)."""
+    body = "\n\n".join(s for s in sections if s)
+    return f"{DIVIDER}\n<blockquote expandable>{body}</blockquote>" if body else None
+
+
+def card(head: str, parts: Sequence[str | None], *tail: str | None, limit: int = MAX_LEN) -> str:
+    """Header + blank line + body parts (n/a hidden) + optional tail (e.g. :func:`background`)."""
+    return _assemble([head, "", *_compact(parts), *(["", *tail] if any(tail) else [])], limit)
+
+
+def problem(title: str, who: str | None = None, detail: Any = None) -> str:
+    """⚠️ Admin notice: ``⚠️ <b>title</b> · who`` + the error as copyable ``<code>``."""
+    head = f"⚠️ <b>{esc(title)}</b>" + (f" · {esc(who)}" if who else "")
+    return head + (f"\n\n<code>{esc(detail)}</code>" if detail else "")
+
+
+def _who(profile: ProfileConfig | None) -> str:
+    """Raw display name (escape before use, or pass to :func:`header`)."""
+    return getattr(profile, "name", None) or "profile"
 
 
 def _n(value: Any, digits: int = 0, unit: str = "", sep: bool = False) -> str:
@@ -591,9 +653,9 @@ def fitness_lines(fit: dict[str, Any] | None) -> list[str]:
     balance = _first((ts.get("mostRecentTrainingLoadBalance") or {}).get("metricsTrainingLoadBalanceDTOMap"))
     bal = str(balance.get("trainingBalanceFeedbackPhrase") or "")
     if phrase or bal:
-        txt = f"📈 Training status: {esc(_title(phrase))}" if phrase else "📈 Training"
+        txt = f"📈 Training status: {_title(phrase)}" if phrase else "📈 Training"  # _title escapes
         if bal:
-            txt += f" · load {esc(_BALANCE_TEXT.get(bal, _title(bal)))}"
+            txt += f" · load {_BALANCE_TEXT.get(bal) or _title(bal)}"
         lines.append(txt)
 
     weeks = [w for w in fit.get("intensity") or [] if isinstance(w, dict)]
@@ -627,12 +689,13 @@ def morning_brief(
     """🌅 Morning brief: last night's sleep, HRV, resting HR, readiness, overnight episodes."""
     tz = _tz(profile, today)
     s = today.summary
+    sleep = _sleep_lines(today)
     parts: list[str | None] = [
-        f"🌅 <b>Good morning, {_name(profile)}</b> — {_day_label(today.day)}",
-        "",
-        "😴 <b>Last night</b>",
-        *_sleep_lines(today),
+        f"😴 <b>Last night</b> · {sleep[0]}",
+        *("🛌 " + line for line in sleep[1:]),
         _hrv_line(today),
+        "",
+        "☀️ <b>Ready for today</b>",
         _rhr_line(today, yesterday_row),
     ]
 
@@ -665,12 +728,13 @@ def morning_brief(
     parts.append(f"🫁 Lowest SpO2 overnight: {_n(spo2_low, unit='%')}")
 
     if yesterday_row:
-        parts.append(
-            "📅 Yesterday: "
+        parts += [
+            "",
+            "📅 <b>Yesterday</b> · "
             f"{_n(_row_get(yesterday_row, 'total_steps'), sep=True)} steps · "
             f"RHR {_n(_row_get(yesterday_row, 'resting_hr'))} · "
-            f"stress {_n(_row_get(yesterday_row, 'avg_stress'))}"
-        )
+            f"stress {_n(_row_get(yesterday_row, 'avg_stress'))}",
+        ]
 
     palp_on = bool(getattr(getattr(profile, "features", None), "palpitations", False))
     episodes = list(overnight_episodes or [])
@@ -678,14 +742,15 @@ def morning_brief(
         parts.append("")
         parts.append(f"❤️ <b>Overnight / early-morning heart-rate excursions: {len(episodes)}</b>")
         parts.extend(_limited([_episode_line(e, tz, False, True) for e in episodes], 6))
-        parts.append("Use /episodes for details, or /palp HH:MM if you felt something.")
+        parts.append("<i>Use /episodes for details, or /palp HH:MM if you felt something.</i>")
     elif palp_on:
-        parts.append("❤️ No at-rest heart-rate excursions overnight.")
+        parts += ["", "❤️ No at-rest heart-rate excursions overnight."]
 
-    if coaching is not None:
-        parts.append("")
-        parts.append(coaching_block(coaching))
-    return _assemble(_compact(parts))
+    return card(
+        header("morning", "Good morning", _who(profile), _day_label(today.day)),
+        parts,
+        background(coaching_block(coaching)),
+    )
 
 
 def evening_summary(
@@ -704,16 +769,14 @@ def evening_summary(
     steps = _steps_today(today)
     goal = s.step_goal
     parts: list[str | None] = [
-        f"🌙 <b>Evening summary — {_name(profile)}</b> — {_day_label(today.day)}",
-        "",
-        f"👟 <b>Steps</b> {_bar(steps, goal)} {_n(steps, sep=True)} / {_n(goal, sep=True)}{_pct(steps, goal)}",
+        f"👟 <b>Steps</b> · {_bar(steps, goal)} {_n(steps, sep=True)} / {_n(goal, sep=True)}{_pct(steps, goal)}",
     ]
     avg_steps = _row_avg(rows_7d, "total_steps", exclude_day=day_str)
     if avg_steps is not None:
-        parts.append(f"7-day avg {_n(avg_steps, sep=True)} · today {_arrow(steps, avg_steps, sep=True)}")
+        parts.append(f"📊 7-day avg {_n(avg_steps, sep=True)} · today {_arrow(steps, avg_steps, sep=True)}")
     km = None if s.distance_m is None else s.distance_m / 1000.0
     parts.append(
-        f"Distance {_n(km, 1, ' km')} · Floors {_n(s.floors_up)} · "
+        f"📏 Distance {_n(km, 1, ' km')} · Floors {_n(s.floors_up)} · "
         f"Calories {_n(s.total_kcal, sep=True)} kcal (active {_n(s.active_kcal, sep=True)})"
     )
     active_s = None
@@ -723,11 +786,11 @@ def evening_summary(
     if s.moderate_intensity_min is not None or s.vigorous_intensity_min is not None:
         intensity = (s.moderate_intensity_min or 0) + 2 * (s.vigorous_intensity_min or 0)
     parts.append(
-        f"Active time {fmt_duration(active_s)} · Intensity minutes {_n(intensity)}"
+        f"⏱️ Active time {fmt_duration(active_s)} · Intensity minutes {_n(intensity)}"
         + (f" (weekly goal {_n(s.intensity_goal_min)})" if s.intensity_goal_min else "")
     )
 
-    parts.append("")
+    parts += ["", "💚 <b>Recovery</b> · stress, energy, sleep"]
     high_stress = None if s.high_stress_seconds is None else s.high_stress_seconds / 60.0
     stress_txt = f"🧘 Stress avg {_n(s.avg_stress)}{_delta(s.avg_stress, _row_avg(rows_7d, 'avg_stress', day_str))}"
     stress_txt += f" · high stress {_minutes(high_stress)}"
@@ -756,7 +819,7 @@ def evening_summary(
     parts.append("")
     acts = list(today.activities or [])
     if acts:
-        parts.append(f"🏃 <b>Activities ({len(acts)})</b>")
+        parts.append(f"🏃 <b>Activities</b> · {len(acts)}")
         parts.extend(_limited([_activity_line(a) for a in acts], 6))
     else:
         parts.append("🏃 No recorded activities today.")
@@ -772,19 +835,17 @@ def evening_summary(
             parts.append("❤️ No at-rest heart-rate excursions detected today.")
         reps = list(symptoms_today or [])
         if reps:
+            parts.append("")
             parts.append(f"📝 <b>Reported symptoms today: {len(reps)}</b>")
             parts.extend(_limited([_symptom_line(r, tz, with_date=False) for r in reps], 6))
         else:
-            parts.append("📝 No symptoms reported today (use /palp if you felt something).")
+            parts.append("📝 No symptoms reported today <i>(use /palp if you felt something)</i>.")
 
-    fit = fitness_lines(fitness)
-    if fit:
-        parts.append("")
-        parts.extend(fit)
-    if coaching is not None:
-        parts.append("")
-        parts.append(coaching_block(coaching))
-    return _assemble(_compact(parts))
+    return card(
+        header("evening", "Evening summary", _who(profile), _day_label(today.day)),
+        parts,
+        background("\n".join(fitness_lines(fitness)), coaching_block(coaching)),
+    )
 
 
 def _week_table(rows: Sequence[Any]) -> str:
@@ -840,16 +901,13 @@ def weekly_review(
     tz = _tz(profile)
     cur = list(rows_this_week or [])
     prev = list(rows_prev_week or [])
-    parts: list[str | None] = [
-        f"📊 <b>Weekly review — {_name(profile)}</b> — {_week_label(cur)}",
-        "",
-    ]
+    parts: list[str | None] = []
     if cur:
-        parts.append(_week_table(cur[-7:]))
+        parts += ["🗓 <b>Day by day</b> · Str = stress · BB = body battery", _week_table(cur[-7:])]
     else:
-        parts.append("No daily data stored for this week yet.")
+        parts.append("🗓 No daily data stored for this week yet.")
     parts.append("")
-    parts.append("<b>Versus the previous week</b>")
+    parts.append("📈 <b>Versus the previous week</b>")
     steps_total = _row_sum(cur, "total_steps")
     parts.append(
         f"👟 Steps total {_n(steps_total, sep=True)}"
@@ -889,16 +947,17 @@ def weekly_review(
             per_day = Counter(to_local(e.start, tz).date() for e in eps if e.start is not None)
             days_txt = " · ".join(f"{_short_day(d)} ×{n}" for d, n in sorted(per_day.items()))
             felt = sum(1 for e in eps if e.felt is True)
-            parts.append(f"❤️ <b>At-rest heart-rate excursions this week: {len(eps)}</b> (felt {felt})")
-            parts.append(esc(days_txt) if days_txt else None)
-            parts.append("See /episodes 7 for the list, /report 30 for the doctor PDF.")
+            parts.append(f"❤️ <b>At-rest heart-rate excursions this week: {len(eps)}</b> · felt {felt}")
+            parts.append("📅 " + esc(days_txt) if days_txt else None)
+            parts.append("<i>See /episodes 7 for the list, /report 30 for the doctor PDF.</i>")
         else:
             parts.append("❤️ No at-rest heart-rate excursions this week.")
 
-    if coaching is not None:
-        parts.append("")
-        parts.append(coaching_block(coaching))
-    return _assemble(_compact(parts))
+    return card(
+        header("weekly", "Weekly review", _who(profile), _week_label(cur)),
+        parts,
+        background(coaching_block(coaching)),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -917,10 +976,9 @@ def today_status(
     now = now or now_utc()
     s = snap.summary
     steps = _steps_today(snap)
+    head = header("today", "Right now", _who(profile), f"{_day_label(now, tz)} {fmt_hm(now, tz)}")
     parts: list[str | None] = [
-        f"📍 <b>Right now — {_name(profile)}</b> — {_day_label(now, tz)} {fmt_hm(now, tz)}",
-        "",
-        f"👟 Steps so far: {_bar(steps, s.step_goal)} {_n(steps, sep=True)} / {_n(s.step_goal, sep=True)}{_pct(steps, s.step_goal)}",
+        f"👟 <b>Steps so far</b> · {_bar(steps, s.step_goal)} {_n(steps, sep=True)} / {_n(s.step_goal, sep=True)}{_pct(steps, s.step_goal)}",
     ]
     last_bb = _latest(snap.body_battery)
     if last_bb is not None:
@@ -933,16 +991,18 @@ def today_status(
     else:
         parts.append(f"❤️ Last HR: {NA} · resting {_n(s.resting_hr)}{_delta(s.resting_hr, s.resting_hr_7d_avg)}")
     parts.append(f"🧘 Stress avg: {_n(s.avg_stress)}")
+    parts.append("")
     acts = list(snap.activities or [])
     if acts:
-        parts.append(f"🏃 Activities so far ({len(acts)}):")
+        parts.append(f"🏃 <b>Activities so far</b> · {len(acts)}")
         parts.extend(_limited([_activity_line(a) for a in acts], 4))
     else:
         parts.append("🏃 No recorded activities so far.")
     eps = list(episodes_today or [])
     palp_on = bool(getattr(getattr(profile, "features", None), "palpitations", False))
     if eps:
-        parts.append(f"❤️ At-rest heart-rate excursions today: {len(eps)}")
+        parts.append("")
+        parts.append(f"❤️ <b>At-rest heart-rate excursions today: {len(eps)}</b>")
         parts.extend(_limited([_episode_line(e, tz, False, False) for e in eps], 4))
     elif palp_on:
         parts.append("❤️ At-rest heart-rate excursions today: none")
@@ -962,29 +1022,27 @@ def today_status(
         age_h = (now - sync).total_seconds() / 3600.0
         if age_h > NO_SYNC_WARN_HOURS:
             parts.append(
-                f"⚠️ Watch has not synced for {fmt_duration(age_h * 3600)} — "
-                "check it is worn and Garmin Connect is open on the phone."
+                f"⚠️ <b>Watch has not synced for {fmt_duration(age_h * 3600)}</b>\n"
+                "<i>Check it is worn and Garmin Connect is open on the phone.</i>"
             )
-    return _assemble(_compact(parts))
+    return card(head, parts)
 
 
 def sleep_message(profile: ProfileConfig, snap: DaySnapshot) -> str:
     """😴 Detailed sleep for ``/sleep``."""
     tz = _tz(profile, snap)
     sl = snap.sleep
-    parts: list[str | None] = [
-        f"😴 <b>Sleep — {_name(profile)}</b> — night to {_day_label(snap.day)}",
-        "",
-    ]
+    head = header("sleep", "Sleep", _who(profile), f"night to {_day_label(snap.day)}")
     if sl is None:
-        parts.append("No sleep data for this night (watch not worn, or not synced yet).")
-        return _assemble(parts)
+        return card(head, ["No sleep data for this night <i>(watch not worn, or not synced yet)</i>."])
     total = sl.total_seconds
-    parts.append(f"Bed {_hm(sl.start, tz)} → wake {_hm(sl.end, tz)} · {fmt_duration(total)} asleep")
     score = _n(sl.score)
     if sl.score_qualifier:
         score += f" ({_title(sl.score_qualifier)})"
-    parts.append(f"Score {score}")
+    parts: list[str | None] = [
+        f"🛌 <b>Score {score}</b> · {fmt_duration(total)} asleep",
+        f"⏰ Bed {_hm(sl.start, tz)} → wake {_hm(sl.end, tz)}",
+    ]
 
     def stage(label: str, secs: int | None) -> str:
         txt = f"{label} {fmt_duration(secs)}"
@@ -993,7 +1051,8 @@ def sleep_message(profile: ProfileConfig, snap: DaySnapshot) -> str:
         return txt
 
     parts.append(
-        " · ".join(
+        "📊 "
+        + " · ".join(
             [
                 stage("Deep", sl.deep_seconds),
                 stage("Light", sl.light_seconds),
@@ -1003,8 +1062,9 @@ def sleep_message(profile: ProfileConfig, snap: DaySnapshot) -> str:
         )
     )
     if sl.nap_seconds:
-        parts.append(f"Nap {fmt_duration(sl.nap_seconds)}")
-    parts.append(f"Woke {_n(sl.awake_count)} times · restless moments {_n(sl.restless_moments)}")
+        parts.append(f"💤 Nap {fmt_duration(sl.nap_seconds)}")
+    parts.append(f"🔄 Woke {_n(sl.awake_count)} times · restless moments {_n(sl.restless_moments)}")
+    parts.append("")
     hrv_txt = f"HRV {_n(sl.avg_hrv, unit=' ms')}"
     status = sl.hrv_status or (snap.hrv.status if snap.hrv is not None else None)
     if status:
@@ -1017,7 +1077,7 @@ def sleep_message(profile: ProfileConfig, snap: DaySnapshot) -> str:
     if sl.body_battery_change is not None:
         sign = "+" if sl.body_battery_change >= 0 else ""
         parts.append(f"🔋 Body battery {sign}{_n(sl.body_battery_change)} overnight")
-    return _assemble(parts)
+    return _assemble([head, "", *parts])
 
 
 def hr_message(profile: ProfileConfig, snap: DaySnapshot, episodes: Sequence[Episode] | None) -> str:
@@ -1026,16 +1086,18 @@ def hr_message(profile: ProfileConfig, snap: DaySnapshot, episodes: Sequence[Epi
     s = snap.summary
     last = _latest(snap.hr)
     parts: list[str | None] = [
-        f"❤️ <b>Heart rate — {_name(profile)}</b> — {_day_label(snap.day)}",
-        f"Resting {_n(s.resting_hr, unit=' bpm')}{_delta(s.resting_hr, s.resting_hr_7d_avg)}",
-        f"Min {_n(s.min_hr)} · Max {_n(s.max_hr)} · {len(snap.hr)} readings"
+        header("hr", "Heart rate", _who(profile), _day_label(snap.day)),
+        "",
+        f"💓 <b>Resting {_n(s.resting_hr, unit=' bpm')}</b>{_delta(s.resting_hr, s.resting_hr_7d_avg)}",
+        f"📊 Min {_n(s.min_hr)} · Max {_n(s.max_hr)} · {len(snap.hr)} readings"
         + (f" (last {fmt_hm(last.ts, tz)}: {_n(last.hr)} bpm)" if last is not None else ""),
     ]
     if s.abnormal_hr_alerts:
         parts.append(f"⚠️ Watch abnormal-HR alerts: {_n(s.abnormal_hr_alerts)}")
+    parts.append("")
     eps = list(episodes or [])
     if eps:
-        parts.append(f"At-rest excursions: {len(eps)}")
+        parts.append(f"❤️ <b>At-rest excursions</b> · {len(eps)}")
         for e in _limited(
             [
                 f"• {_time_range(e.start, e.end, tz)} · {_minutes(e.duration_min)} · peak {_n(e.peak_hr)} "
@@ -1046,7 +1108,7 @@ def hr_message(profile: ProfileConfig, snap: DaySnapshot, episodes: Sequence[Epi
         ):
             parts.append(e)
     else:
-        parts.append("At-rest excursions: none detected.")
+        parts.append("✅ At-rest excursions: none detected.")
     return _assemble(parts, limit=MAX_CAPTION_LEN)
 
 
@@ -1057,24 +1119,24 @@ def steps_message(profile: ProfileConfig, snap: DaySnapshot, rows_7d: Sequence[d
     goal = s.step_goal
     day_str = snap.date_str
     parts: list[str | None] = [
-        f"👟 <b>Steps — {_name(profile)}</b> — {_day_label(snap.day)}",
+        header("steps", "Steps", _who(profile), _day_label(snap.day)),
         "",
-        f"{_bar(steps, goal)} {_n(steps, sep=True)} / {_n(goal, sep=True)}{_pct(steps, goal)}",
+        f"👟 <b>{_n(steps, sep=True)} / {_n(goal, sep=True)}</b>{_pct(steps, goal)} · {_bar(steps, goal)}",
     ]
     avg = _row_avg(rows_7d, "total_steps", exclude_day=day_str)
     if avg is not None:
-        parts.append(f"7-day avg {_n(avg, sep=True)} · today {_arrow(steps, avg, sep=True)}")
+        parts.append(f"📊 7-day avg {_n(avg, sep=True)} · today {_arrow(steps, avg, sep=True)}")
     else:
-        parts.append(f"7-day avg {NA}")
+        parts.append(f"📊 7-day avg {NA}")
     if goal and steps is not None and steps < goal:
-        parts.append(f"{_n(goal - steps, sep=True)} more to reach the goal.")
+        parts.append(f"🎯 {_n(goal - steps, sep=True)} more to reach the goal.")
     elif goal and steps is not None:
-        parts.append("Goal reached 🎉")
+        parts.append("🎯 Goal reached 🎉")
     km = None if s.distance_m is None else s.distance_m / 1000.0
     active_s = None
     if s.active_seconds is not None or s.highly_active_seconds is not None:
         active_s = (s.active_seconds or 0) + (s.highly_active_seconds or 0)
-    parts.append(f"Distance {_n(km, 1, ' km')} · Floors {_n(s.floors_up)} · Active time {fmt_duration(active_s)}")
+    parts.append(f"📏 Distance {_n(km, 1, ' km')} · Floors {_n(s.floors_up)} · Active time {fmt_duration(active_s)}")
     rows = [r for r in (rows_7d or []) if _row_get(r, "day")]
     if rows:
         rows = sorted(rows, key=lambda r: str(_row_get(r, "day")))[-7:]
@@ -1087,8 +1149,9 @@ def steps_message(profile: ProfileConfig, snap: DaySnapshot, rows_7d: Sequence[d
                 met += 1
             table.append(f"{_short_day(_row_get(r, 'day')):<6} {_n(st, sep=True):>7} {_bar(st, g, 8)}")
         parts.append("")
+        parts.append(f"🗓 <b>Last {len(rows)} days</b>")
         parts.append("<pre>" + esc("\n".join(table)) + "</pre>")
-        parts.append(f"Goal met on {met} of the last {len(rows)} days.")
+        parts.append(f"<i>Goal met on {met} of the last {len(rows)} days.</i>")
     return _assemble(parts)
 
 
@@ -1107,19 +1170,18 @@ def episode_alert(
     tz = _tz(profile)
     code = assessment.assessment if assessment is not None else ep.llm_assessment
     parts: list[str | None] = [
-        f"❤️ <b>Possible palpitation — {_name(profile)}</b>",
+        header("episode", "Possible palpitation", _who(profile)),
+        "",
+        f"💓 <b>Peak {_n(ep.peak_hr, unit=' bpm')}</b> · before {_n(ep.baseline_hr, unit=' bpm')} "
+        f"(+{_n(ep.delta_hr)})",
         f"📅 {_day_label(ep.start, tz)} · 🕒 {_time_range(ep.start, ep.end, tz)} ({_minutes(ep.duration_min)})",
-        f"💓 Peak <b>{_n(ep.peak_hr, unit=' bpm')}</b> · before {_n(ep.baseline_hr, unit=' bpm')} "
-        f"(+{_n(ep.delta_hr)}) · avg {_n(ep.mean_hr, unit=' bpm')}",
-        f"🧭 {'Asleep' if ep.asleep else 'At rest'}, {_n(ep.steps_in_window)} steps",
+        f"🧭 {'Asleep' if ep.asleep else 'At rest'}, {_n(ep.steps_in_window)} steps · avg {_n(ep.mean_hr, unit=' bpm')}",
     ]
     if code:
         parts.append(f"🤖 AI view: {_assessment_label(code)}")
     if links:
-        parts.append(f"🔍 Possible links: {esc(links)}")
-        parts.append(ALERT_TIP)
-    parts.append("<b>Was it felt?</b> Tap below.")
-    parts.append(NOT_DIAGNOSIS)
+        parts += ["", f"🔍 <b>Possible links</b> · {esc(links)}", ALERT_TIP]
+    parts += ["", "👉 <b>Was it felt?</b> Tap below.", DIVIDER, NOT_DIAGNOSIS]
     return _assemble(parts)
 
 
@@ -1150,13 +1212,13 @@ def heart_month(profile: ProfileConfig, title: str, episodes: Sequence[Episode] 
     tz = _tz(profile)
     shown, hidden = _heart_split(episodes)
     days = len({to_local(e.start, tz).date() for e in shown})
-    parts: list[str | None] = [f"❤️ <b>{_name(profile)} · {esc(title)}</b>"]
+    parts: list[str | None] = [header("heart", "Heart", _who(profile), title), ""]
     if shown:
-        parts.append(f"<b>{len(shown)}</b> possible palpitations on <b>{days}</b> days")
+        parts.append(f"📋 <b>{len(shown)}</b> possible palpitations on <b>{days}</b> days")
         parts.append(heart_table(shown, tz))
-        parts.append("Peak = highest bpm · Min = minutes")
+        parts.append("<i>Peak = highest bpm · Min = minutes</i>")
     else:
-        parts.append("✅ No possible palpitations.")
+        parts.append("✅ <b>No possible palpitations.</b>")
     if hidden:
         parts.append(f"<i>{len(hidden)} more looked like exercise (in Obsidian).</i>")
     return _assemble(parts)
@@ -1172,16 +1234,18 @@ def heart_review(
     """❤️ 22:00 heart review: every possible palpitation today in one table."""
     tz = _tz(profile, snap)
     shown, hidden = _heart_split(episodes)
-    parts: list[str | None] = [f"❤️ <b>{_name(profile)} · {_day_label(day)}</b>"]
+    parts: list[str | None] = [header("heart", "Heart review", _who(profile), _day_label(day)), ""]
     if shown:
-        parts.append(f"<b>{len(shown)}</b> possible palpitation{'s' if len(shown) != 1 else ''} today")
+        parts.append(f"📋 <b>{len(shown)}</b> possible palpitation{'s' if len(shown) != 1 else ''} today")
         parts.append(heart_table(shown, tz, with_date=False))
     else:
-        parts.append("✅ No possible palpitations today.")
+        parts.append("✅ <b>No possible palpitations today.</b>")
     if hidden:
         parts.append(f"<i>{len(hidden)} more looked like exercise.</i>")
+    if (snap is not None and snap.summary.resting_hr) or med_line:
+        parts.append("")
     if snap is not None and snap.summary.resting_hr:
-        parts.append(f"Resting HR today: {_n(snap.summary.resting_hr, unit=' bpm')}")
+        parts.append(f"💓 Resting HR today: {_n(snap.summary.resting_hr, unit=' bpm')}")
     if med_line:
         parts.append(esc(med_line))
     return _assemble(parts)
@@ -1190,8 +1254,9 @@ def heart_review(
 def med_reminder(profile: ProfileConfig, hhmm: str) -> str:
     """💊 Reminder text; the bot adds the ✅ Taken button."""
     return (
-        f"💊 <b>{esc(profile.medication.name or 'Medicine')}</b> · {esc(hhmm)} dose ({_name(profile)})\n"
-        "Tap ✅ when taken."
+        f"{header('med', 'Medicine', _who(profile), f'{hhmm} dose')}\n\n"
+        f"💊 <b>{esc(profile.medication.name or 'Medicine')}</b> · {esc(hhmm)} dose\n"
+        "👉 Tap ✅ when taken."
     )
 
 
@@ -1210,8 +1275,9 @@ def _frequency_summary(episodes: Sequence[Episode], days: int, tz: str) -> str |
     not_noticed = sum(1 for e in episodes if e.felt is False)
     unanswered = n - felt - not_noticed
     return (
-        f"📈 <b>Frequency:</b> about {per_week:.1f} per week · most common hour {hour_txt} · "
-        f"{asleep} during sleep · felt {felt}, not noticed {not_noticed}, unanswered {unanswered}"
+        f"📈 <b>Frequency</b> · about {per_week:.1f} per week\n"
+        f"🕒 Most common hour {hour_txt} · {asleep} during sleep\n"
+        f"👤 Felt {felt}, not noticed {not_noticed}, unanswered {unanswered}"
     )
 
 
@@ -1230,21 +1296,21 @@ def episodes_list(
     eps = sorted(episodes or [], key=lambda e: e.start or now_utc(), reverse=True)
     reps = sorted(symptoms or [], key=lambda r: r.event_time or now_utc(), reverse=True)
     parts: list[str | None] = [
-        f"🩺 <b>Palpitation diary — {_name(profile)}</b> — last {days} days",
+        header("diary", "Palpitation diary", _who(profile), f"last {days} days"),
         "",
     ]
     if not eps and not reps:
-        parts.append(f"Nothing recorded in the last {days} days.")
-        parts.append("Log anything you feel with <code>/palp HH:MM note</code> so it reaches the doctor report.")
+        parts.append(f"✅ Nothing recorded in the last {days} days.")
+        parts.append("<i>Log anything you feel with</i> <code>/palp HH:MM note</code> <i>so it reaches the doctor report.</i>")
         return _assemble(parts)
     if eps:
-        parts.append(f"<b>Detected episodes: {len(eps)}</b>")
+        parts.append(f"❤️ <b>Detected episodes: {len(eps)}</b>")
         parts.extend(_limited([_episode_line(e, tz, True, True) for e in eps], 20))
     else:
-        parts.append("Detected episodes: none.")
+        parts.append("❤️ Detected episodes: none.")
     parts.append("")
     if reps:
-        parts.append(f"<b>📝 Reported symptoms: {len(reps)}</b>")
+        parts.append(f"📝 <b>Reported symptoms: {len(reps)}</b>")
         parts.extend(_limited([_symptom_line(r, tz) for r in reps], 10))
     else:
         parts.append("📝 Reported symptoms: none.")
@@ -1252,8 +1318,7 @@ def episodes_list(
     if freq:
         parts.append("")
         parts.append(freq)
-    parts.append("")
-    parts.append("Use /report 30 for the doctor PDF + CSV. " + NOT_DIAGNOSIS)
+    parts += ["", DIVIDER, "<i>Use /report 30 for the doctor PDF + CSV.</i>", NOT_DIAGNOSIS]
     return _assemble(parts)
 
 
@@ -1268,11 +1333,13 @@ def symptom_logged(profile: ProfileConfig, rep: SymptomReport) -> str:
     tz = _tz(profile)
     parts: list[str | None] = [
         RED_FLAG_TEXT if rep.red_flag else None,
-        f"📝 <b>Symptom logged — {_name(profile)}</b>",
-        f"🕒 {_day_label(rep.event_time, tz)} {_hm(rep.event_time, tz)}",
+        "" if rep.red_flag else None,
+        header("symptom", "Symptom logged", _who(profile)),
+        "",
+        f"🕒 <b>{_day_label(rep.event_time, tz)} {_hm(rep.event_time, tz)}</b>",
     ]
     if rep.note:
-        parts.append(f"Note: “{esc(rep.note)}”")
+        parts.append(f"💬 Note: “{esc(rep.note)}”")
     if rep.hr_at_time is not None:
         hr_txt = f"❤️ Heart rate near that time: {_n(rep.hr_at_time, unit=' bpm')}"
         hr_txt += _delta(rep.hr_at_time, rep.baseline_hr, label="at-rest baseline")
@@ -1282,14 +1349,17 @@ def symptom_logged(profile: ProfileConfig, rep: SymptomReport) -> str:
     if rep.episode_id is not None:
         parts.append(f"🔗 Linked to detected episode #{_n(rep.episode_id)}")
     ex = rep.extracted or {}
+    extra: list[str] = []
     if ex.get("symptoms"):
-        parts.append("Symptoms: " + esc(", ".join(s.replace("_", " ") for s in ex["symptoms"])))
+        extra.append("🩺 Symptoms: " + esc(", ".join(s.replace("_", " ") for s in ex["symptoms"])))
     if ex.get("duration_minutes") is not None:
-        parts.append(f"Duration: {_n(ex['duration_minutes'], unit=' min')}")
+        extra.append(f"⏱️ Duration: {_n(ex['duration_minutes'], unit=' min')}")
     if ex.get("possible_triggers"):
-        parts.append("Before it: " + esc(", ".join(t.replace("_", " ") for t in ex["possible_triggers"])))
+        extra.append("☕ Before it: " + esc(", ".join(t.replace("_", " ") for t in ex["possible_triggers"])))
+    if extra:
+        parts += ["", *extra]
     parts.append("")
-    parts.append("Saved to the doctor report. If it keeps happening or feels worse, contact your doctor.")
+    parts.append("✅ Saved to the doctor report. <i>If it keeps happening or feels worse, contact your doctor.</i>")
     return _assemble(parts)
 
 
@@ -1299,21 +1369,21 @@ def alert_message(alert: Alert) -> str:
     emoji = SEVERITY_EMOJI.get(sev, "ℹ️")
     title = esc(getattr(alert, "title", None) or "Alert")
     who = getattr(alert, "profile", None)
-    if who:
-        title += f" ({esc(who)})"
     body = getattr(alert, "body", None)
-    parts: list[str | None] = [f"{emoji} <b>{title}</b>"]
+    parts: list[str | None] = [f"{emoji} <b>{title}</b>" + (f" · {esc(who)}" if who else "")]
     if body:
-        parts.append(esc(body))
+        parts += ["", esc(body)]
     return _assemble(parts)
 
 
 def doctor_report_caption(profile: ProfileConfig, days: int, n_episodes: int, n_symptoms: int) -> str:
     """🩺 Caption for the PDF/CSV doctor report (kept under the caption limit)."""
     parts: list[str | None] = [
-        f"🩺 <b>Doctor report — {_name(profile)}</b> — last {_n(days)} days",
-        f"{_n(n_episodes)} detected episode(s), {_n(n_symptoms)} reported symptom(s).",
-        "Inside: how often, what time of day, asleep vs awake, felt vs detected, heart-rate charts.",
+        header("doctor", "Doctor report", _who(profile), f"last {_n(days)} days"),
+        "",
+        f"📋 <b>{_n(n_episodes)} detected episode(s)</b> · {_n(n_symptoms)} reported symptom(s)",
+        "📄 Inside: how often, what time of day, asleep vs awake, felt vs detected, heart-rate charts.",
+        "",
         NOT_DIAGNOSIS,
     ]
     return _assemble(parts, limit=MAX_CAPTION_LEN)
@@ -1322,8 +1392,9 @@ def doctor_report_caption(profile: ProfileConfig, days: int, n_episodes: int, n_
 def help_text(is_admin: bool) -> str:
     """Command list with one-line descriptions (admin extras when ``is_admin``)."""
     parts: list[str | None] = [
-        "🤖 <b>Garmin Health Monitor — commands</b>",
+        header("help", "Garmin Health Monitor", "commands"),
         "",
+        "📋 <b>Commands</b>",
         "/today — live snapshot: steps, body battery, last heart rate, sync",
         "/yesterday — yesterday's full summary",
         "/sleep — last night's sleep in detail",
@@ -1341,7 +1412,7 @@ def help_text(is_admin: bool) -> str:
         parts.extend(
             [
                 "",
-                "<b>Admin</b>",
+                "🛠 <b>Admin</b>",
                 "/status — service health: last poll, Ollama, sync per profile",
                 "/mfa &lt;code&gt; — enter the Garmin verification code when asked",
             ]
@@ -1349,7 +1420,8 @@ def help_text(is_admin: bool) -> str:
     parts.extend(
         [
             "",
-            "When a chat can see several people, name them first: <code>/today Dad</code>.",
+            DIVIDER,
+            "<i>When a chat can see several people, name them first:</i> <code>/today Dad</code>",
             "<i>Wrist-sensor data and local-model suggestions, not medical advice.</i>",
         ]
     )
@@ -1359,10 +1431,11 @@ def help_text(is_admin: bool) -> str:
 def mfa_request(profile: ProfileConfig) -> str:
     """🔐 Ask the admin for the Garmin MFA code."""
     parts: list[str | None] = [
-        f"🔐 <b>Garmin Connect needs a verification code ({_name(profile)})</b>",
-        "Garmin has sent a one-time code by email or SMS. Reply here with:",
+        header("mfa", "Garmin needs a code", _who(profile)),
+        "",
+        "📧 Garmin has sent a one-time code by email or SMS. Reply here with:",
         "<code>/mfa &lt;code&gt;</code>",
-        "The login waits about 10 minutes; after that the next poll asks again.",
+        "<i>The login waits about 10 minutes; after that the next poll asks again.</i>",
     ]
     return _assemble(parts)
 
@@ -1400,7 +1473,8 @@ def heart_month_caption(profile: ProfileConfig, title: str, counts: dict[date, i
     many = sum(1 for n in counts.values() if n >= 2)
     one = sum(1 for n in counts.values() if n == 1)
     lines = [
-        f"❤️ <b>{_name(profile)}'s heart · {esc(title)}</b>",
+        header("heart", "Heart month", _who(profile), title),
+        "",
         f"🟥 {many} days: 2 or more episodes",
         f"🟧 {one} days: 1 episode",
         "🟩 other days: normal",
@@ -1408,7 +1482,7 @@ def heart_month_caption(profile: ProfileConfig, title: str, counts: dict[date, i
     if getattr(medication, "name", "") and getattr(medication, "started", None):
         started = date.fromisoformat(medication.started)
         after = sum(1 for d in counts if d > started)
-        lines.append(f"💊 {esc(medication.name)} from {started:%d %b}: " + ("none since" if not after else f"{after} days since"))
+        lines += ["", f"💊 <b>{esc(medication.name)}</b> from {started:%d %b} · " + ("none since" if not after else f"{after} days since")]
     return "\n".join(lines)
 
 
@@ -1417,14 +1491,14 @@ def heart_month_report_text(profile: ProfileConfig, title: str, report: dict[str
     def bullets(items: Sequence[str]) -> str:
         return "\n".join(f"• {esc(i)}" for i in items)
 
-    parts = [f"🧠 <b>{_name(profile)}'s heart · what {esc(title)} shows</b>"]
+    parts = [header("heart_ai", "What the month shows", _who(profile), title), ""]
     if report.get("summary"):
         parts.append(f"<i>{esc(report['summary'])}</i>")
     for head, key in (("🔍 <b>Why it may happen</b>", "why"), ("🌿 <b>Habits that may help</b>", "habits"),
                       ("🩺 <b>Ask the doctor</b>", "ask_doctor")):
         if report.get(key):
             parts += ["", head, bullets(report[key])]
-    parts += ["", "🚨 Chest pain, fainting or bad breathlessness: call 995.",
+    parts += ["", DIVIDER, "🚨 <b>Chest pain, fainting or bad breathlessness: call 995.</b>",
               "<i>AI reading of watch data, not medical advice. Keep taking medicine as the doctor says.</i>"]
     return "\n".join(parts)
 
@@ -1440,7 +1514,7 @@ def progress_caption(
     steps, prev_steps = _row_avg(rows, "total_steps"), _row_avg(prev_rows, "total_steps")
     rhr, prev_rhr = _row_avg(rows, "resting_hr"), _row_avg(prev_rows, "resting_hr")
     workouts = sum(len(r.get("activities") or []) for r in rows)
-    lines = [f"📈 <b>{_name(profile)} · {esc(title)}</b>"]
+    lines = [header("progress", "Month in review", _who(profile), title), ""]
     lines.append(f"👟 Steps {_n(steps, sep=True)}/day" + (f" (before {_n(prev_steps, sep=True)})" if prev_steps else ""))
     lines.append(f"❤️ Resting HR {_n(rhr, unit=' bpm')}" + (f" (before {_n(prev_rhr)})" if prev_rhr else ""))
     lines.append(f"🏃 Workouts {workouts}")
@@ -1452,6 +1526,7 @@ def workout_nudge(profile: ProfileConfig, done: int, goal: int, days_left: int) 
     """🏃 Mid-week nudge when behind the weekly workout goal."""
     need = goal - done
     return (
-        f"🏃 <b>{done} of {goal} workouts this week</b> ({_name(profile)})\n"
-        f"{need} more to go with {days_left} day{'s' if days_left != 1 else ''} left. Even 20 minutes counts."
+        f"{header('nudge', 'Workout nudge', _who(profile))}\n\n"
+        f"🏃 <b>{done} of {goal} workouts this week</b>\n"
+        f"🎯 {need} more to go with {days_left} day{'s' if days_left != 1 else ''} left. <i>Even 20 minutes counts.</i>"
     )

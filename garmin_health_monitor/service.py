@@ -378,7 +378,7 @@ class MonitorService:
         day = day or self.today(profile)
         snap = self.snapshot_for(profile, day, light=False, max_age_s=120)
         if snap is None:
-            return messages.esc(f"No Garmin data available for {profile.name} on {day.isoformat()}.")
+            return "ℹ️ " + messages.esc(f"No Garmin data available for {profile.name} on {day.isoformat()}.")
         if profile.features.palpitations:
             self.run_detection(profile, snap, notify=(day == self.today(profile)))
             self.assess_pending(profile, limit=5)
@@ -413,7 +413,7 @@ class MonitorService:
         today = self.today(profile)
         snap = self.snapshot_for(profile, today, light=True, max_age_s=120)
         if snap is None:
-            return messages.esc(f"No Garmin data yet for {profile.name} today.")
+            return "ℹ️ " + messages.esc(f"No Garmin data yet for {profile.name} today.")
         if profile.features.palpitations:
             self.run_detection(profile, snap, notify=True)
         start, end = self.day_range_utc(profile, today, today)
@@ -427,21 +427,21 @@ class MonitorService:
         day = day or self.today(profile)
         snap = self.snapshot_for(profile, day, light=False, max_age_s=600)
         if snap is None:
-            return messages.esc(f"No sleep data for {profile.name} on {day.isoformat()}.")
+            return "ℹ️ " + messages.esc(f"No sleep data for {profile.name} on {day.isoformat()}.")
         return messages.sleep_message(profile, snap)
 
     def steps_text(self, profile: ProfileConfig) -> str:
         today = self.today(profile)
         snap = self.snapshot_for(profile, today, light=True, max_age_s=120)
         if snap is None:
-            return messages.esc(f"No step data yet for {profile.name} today.")
+            return "ℹ️ " + messages.esc(f"No step data yet for {profile.name} today.")
         return messages.steps_message(profile, snap, self.rows(profile, 7, end=today))
 
     def hr_chart(self, profile: ProfileConfig, day: date | None = None) -> tuple[str, bytes | None]:
         day = day or self.today(profile)
         snap = self.snapshot_for(profile, day, light=True, max_age_s=120)
         if snap is None:
-            return messages.esc(f"No heart-rate data for {profile.name} on {day.isoformat()}."), None
+            return "ℹ️ " + messages.esc(f"No heart-rate data for {profile.name} on {day.isoformat()}."), None
         start, end = self.day_range_utc(profile, day, day)
         episodes = self.storage.get_episodes(profile.name, start, end)
         symptoms = self.storage.get_symptoms(profile.name, start, end)
@@ -686,22 +686,27 @@ class MonitorService:
         today = self.today(profile)
         snap = self.snapshot_for(profile, today, light=False, max_age_s=120)
         if snap is None:
-            return messages.esc(f"No data to analyse for {profile.name} yet.")
+            return "ℹ️ " + messages.esc(f"No data to analyse for {profile.name} yet.")
         advice = self._coaching(profile, snap)
         if advice is None:
-            return messages.esc("Coaching is disabled for this profile.")
-        header = f"🧠 <b>Analysis for {messages.esc(profile.name)}</b> ({messages.esc(today.isoformat())}, {messages.esc(advice.model)})\n"
-        return header + messages.coaching_block(advice)
+            return "ℹ️ " + messages.esc("Coaching is disabled for this profile.")
+        head = messages.header("analysis", "Analysis", profile.name, today.isoformat())
+        model = f"🤖 <i>Model</i> <code>{messages.esc(advice.model)}</code>"
+        return f"{head}\n\n{messages.coaching_block(advice)}\n{model}"
 
     def status_text(self) -> str:
-        lines = [f"<b>Garmin Health Monitor</b> up since {self.started_at.strftime('%Y-%m-%d %H:%M')} UTC"]
+        lines = [
+            messages.header("status", "Garmin Health Monitor", "status"),
+            "",
+            f"⏰ Up since <code>{self.started_at.strftime('%Y-%m-%d %H:%M')} UTC</code>",
+        ]
         llm_state = "disabled"
         if self.llm is not None:
             try:
                 llm_state = f"{describe_backend(self.llm)} {'OK' if self.llm.is_available() else 'UNAVAILABLE'}"
             except Exception as exc:  # noqa: BLE001
                 llm_state = f"{describe_backend(self.llm)} error: {exc}"
-        lines.append(f"LLM: {messages.esc(llm_state)}")
+        lines.append(f"🧠 LLM: {messages.esc(llm_state)}")
         for p in self.config.profiles:
             days = self.storage.days_with_data(p.name)
             last = days[-1] if days else "none"
@@ -711,9 +716,10 @@ class MonitorService:
             n_eps = len(self.storage.get_episodes(p.name, s, e)) if p.features.palpitations else 0
             row = self.storage.get_snapshot_row(p.name, today)
             fetched = row["fetched_at"].strftime("%H:%M UTC") if row and row.get("fetched_at") else "never today"
-            lines.append(
-                f"• <b>{messages.esc(p.name)}</b>: {len(days)} days stored (latest {messages.esc(last)}), "
-                f"last fetch {messages.esc(fetched)}, {tokens}"
-                + (f", {n_eps} episode(s) in 7d" if p.features.palpitations else "")
-            )
+            lines += [
+                "",
+                f"👤 <b>{messages.esc(p.name)}</b> · {len(days)} days stored (latest {messages.esc(last)})",
+                f"📡 Last fetch {messages.esc(fetched)} · {tokens}"
+                + (f" · {n_eps} episode(s) in 7d" if p.features.palpitations else ""),
+            ]
         return "\n".join(lines)

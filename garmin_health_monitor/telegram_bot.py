@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import html
 import logging
 import re
 import threading
@@ -34,6 +35,7 @@ from telegram import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     InputFile,
+    LinkPreviewOptions,
     Message,
     Update,
 )
@@ -45,6 +47,7 @@ from telegram.ext import (
     CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
+    Defaults,
     MessageHandler,
     filters,
 )
@@ -69,7 +72,8 @@ MAX_CALLBACK_ANSWER_LEN = 200
 FELT_CALLBACK_RE = re.compile(r"^felt:(\d+):(yes|no)$")
 MED_CALLBACK_RE = re.compile(r"^med:([a-z0-9-]+):(\d{4}-\d{2}-\d{2}):(\d{4})$")
 _TIME_ARG_RE = re.compile(r"^(\d{1,2})[:.h](\d{2})$|^(\d{2})(\d{2})$")
-_TAG_RE = re.compile(r"<(/?)(b|i|u|s|code|pre|strong|em)>", re.IGNORECASE)
+#: Any Telegram HTML tag, with attributes (``<a href="…">``, ``<blockquote expandable>``).
+_TAG_RE = re.compile(r"<(/?)([a-z][a-z-]*)((?:\s[^>]*)?)>", re.IGNORECASE)
 
 DEFAULT_EPISODE_DAYS = 7
 MAX_EPISODE_DAYS = 90
@@ -99,60 +103,68 @@ _BOT_COMMANDS: list[tuple[str, str]] = [
 
 
 def _open_tags(fragment: str) -> list[str]:
-    """Return the HTML tags still open at the end of ``fragment`` (outermost first)."""
-    stack: list[str] = []
+    """Opening tags (with attributes) still open at the end of ``fragment``, outermost first."""
+    stack: list[tuple[str, str]] = []
     for m in _TAG_RE.finditer(fragment):
-        closing, name = m.group(1) == "/", m.group(2).lower()
-        if closing:
-            if name in stack:
-                # pop up to and including the matching tag
-                while stack:
-                    top = stack.pop()
-                    if top == name:
-                        break
+        name = m.group(2).lower()
+        if m.group(1):  # closing: pop up to and including the matching tag
+            if any(n == name for n, _ in stack):
+                while stack and stack.pop()[0] != name:
+                    pass
         else:
-            stack.append(name)
-    return stack
+            stack.append((name, m.group(0)))
+    return [opener for _, opener in stack]
+
+
+def _closer(opener: str) -> str:
+    return "</" + _TAG_RE.match(opener).group(2) + ">"
+
+
+def _safe_cut(window: str) -> int:
+    """Where to cut ``window``: the last blank line (between blocks), else line, else space.
+
+    The cut never lands inside ``<tag …>`` or an ``&entity;``.
+    """
+    cut = window.rfind("\n\n")
+    if cut <= 0:
+        cands = (window.rfind("\n"), window.rfind(" "))
+        cut = next((p for p in cands if p > len(window) // 4), len(window))  # no tiny chunks
+    head = window[:cut]
+    if head.rfind("<") > head.rfind(">"):  # escaped text has no bare "<": we are inside a tag
+        cut = head.rfind("<")
+    amp = window.rfind("&", 0, cut)
+    if amp > window.rfind(";", 0, cut) and cut - amp <= 10:
+        cut = amp
+    return cut if cut > 0 else len(window)
 
 
 def chunk_text(text: str, limit: int = MAX_TEXT_LEN) -> list[str]:
     """Split ``text`` into pieces of at most ``limit`` characters.
 
-    Splits on paragraph/line boundaries when possible, then on spaces, then
-    hard.  Simple HTML tags (``<b>``, ``<i>``, ``<code>``, ``<pre>``...) that
-    would straddle a boundary are closed at the end of one chunk and re-opened
-    at the start of the next so Telegram still accepts each piece.
+    Cuts between blocks (blank lines) first, then lines, then spaces, and a hard
+    cut never lands inside a tag or entity.  Tags left open at a cut (``<b>``,
+    ``<a href>``, ``<blockquote expandable>``...) are closed at the end of one
+    piece and re-opened at the start of the next, so every piece is valid HTML.
     """
     text = text or ""
     if len(text) <= limit:
         return [text] if text else []
-    reserve = min(64, max(0, limit // 4))  # room for the closing tags we may append
+    reserve = min(96, max(0, limit // 4))  # room for the closing tags we may append
     chunks: list[str] = []
-    carry: list[str] = []  # tags to re-open at the start of the next chunk
+    carry: list[str] = []  # opening tags to re-open at the start of the next chunk
     rest = text
     while rest:
-        prefix = "".join(f"<{t}>" for t in carry)
+        prefix = "".join(carry)
         budget = max(1, limit - len(prefix) - reserve)
         if len(rest) <= budget:
             body, rest = rest, ""
         else:
-            window = rest[:budget]
-            cut = -1
-            for sep in ("\n\n", "\n", " "):
-                pos = window.rfind(sep)
-                if pos > budget // 4:  # avoid pathological tiny chunks
-                    cut = pos
-                    break
-            if cut <= 0:
-                cut = budget
-            body = rest[:cut]
-            rest = rest[cut:].lstrip("\n ")
-        open_tags = _open_tags(prefix + body)
-        suffix = "".join(f"</{t}>" for t in reversed(open_tags))
-        chunk = prefix + body + suffix
-        if chunk.strip():
+            cut = _safe_cut(rest[:budget])
+            body, rest = rest[:cut], rest[cut:].lstrip("\n ")
+        carry = _open_tags(prefix + body)
+        chunk = prefix + body + "".join(_closer(t) for t in reversed(carry))
+        if _TAG_RE.sub("", chunk).strip():
             chunks.append(chunk)
-        carry = open_tags
     return chunks
 
 
@@ -227,8 +239,26 @@ def _is_parse_error(exc: BaseException) -> bool:
 
 
 def _plain(text: str) -> str:
-    """Strip the simple HTML tags we use so a fallback message still reads well."""
-    return re.sub(r"</?(b|i|u|s|code|pre|strong|em|a)(\s[^>]*)?>", "", text or "")
+    """Telegram HTML -> plain text (tags stripped, entities unescaped) for the parse-error fallback."""
+    return html.unescape(_TAG_RE.sub("", text or ""))
+
+
+async def send_html(send: Callable[..., Awaitable[Any]], field: str, text: str | None, **kwargs: Any) -> Any:
+    """The one HTML send path: ``send(**{field: text}, parse_mode=HTML, **kwargs)``.
+
+    ``field`` is ``"text"`` for messages or ``"caption"`` for photos/documents.
+    When Telegram answers 400 "can't parse entities" the same content is resent
+    as plain text, so an alert is never lost to a formatting bug.
+    """
+    if not text:
+        return await send(**kwargs)
+    try:
+        return await send(**{field: text}, parse_mode=ParseMode.HTML, **kwargs)
+    except BadRequest as exc:
+        if not _is_parse_error(exc):
+            raise
+        logger.warning("Telegram rejected HTML (%s); resending as plain text", exc)
+        return await send(**{field: _plain(text)}, parse_mode=None, **kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -331,7 +361,12 @@ class HealthBot:
         #: through ``asyncio.run_coroutine_threadsafe``).
         self.loop: asyncio.AbstractEventLoop | None = None
         self.app: Application = (
-            ApplicationBuilder().token(config.telegram.bot_token).post_init(self._post_init).build()
+            ApplicationBuilder()
+            .token(config.telegram.bot_token)
+            # no link-preview cards under any message (Telegram's disable_web_page_preview)
+            .defaults(Defaults(link_preview_options=LinkPreviewOptions(is_disabled=True)))
+            .post_init(self._post_init)
+            .build()
         )
         self._register_handlers()
 
@@ -454,7 +489,7 @@ class HealthBot:
         if chat_id is None or message is None:
             return None
         if self.service is None:
-            await self._reply(message, "The monitor service is not running; try again later.")
+            await self._reply(message, "⚠️ The monitor service is not running; try again later.")
             return None
         profile, args, err = self._resolve_profile(chat_id, self._args(context))
         if profile is None:
@@ -470,8 +505,8 @@ class HealthBot:
             logger.exception("%s: %s failed", ctx.profile.name, what)
             await self._reply(
                 ctx.message,
-                f"Sorry, I could not {messages.esc(what)} right now ({messages.esc(type(exc).__name__)}). "
-                "Please try again in a few minutes.",
+                f"⚠️ Sorry, I could not {messages.esc(what)} right now (<code>{messages.esc(type(exc).__name__)}</code>).\n"
+                "<i>Please try again in a few minutes.</i>",
             )
             return None
 
@@ -486,19 +521,13 @@ class HealthBot:
     ) -> None:
         """Send ``text`` through ``send(text=..., **kwargs)`` in <= 4000-char pieces.
 
-        Falls back to plain text when Telegram rejects the HTML.  ``reply_markup``
-        goes on the last piece only.
+        Each piece goes through :func:`send_html` (plain-text fallback on a parse
+        error).  ``reply_markup`` goes on the last piece only.
         """
         chunks = chunk_text(text, MAX_TEXT_LEN) or ["n/a"]
         for i, chunk in enumerate(chunks):
             markup = reply_markup if i == len(chunks) - 1 else None
-            try:
-                await send(text=chunk, parse_mode=ParseMode.HTML, reply_markup=markup, **kwargs)
-            except BadRequest as exc:
-                if not _is_parse_error(exc):
-                    raise
-                logger.warning("Telegram rejected HTML (%s); resending as plain text", exc)
-                await send(text=_plain(chunk), parse_mode=None, reply_markup=markup, **kwargs)
+            await send_html(send, "text", chunk, reply_markup=markup, **kwargs)
 
     async def _reply(
         self, message: Message, text: str, reply_markup: InlineKeyboardMarkup | None = None
@@ -562,28 +591,16 @@ class HealthBot:
         extra = self._thread_kwargs(chat_id, profile)
         caption = caption or ""
         if len(caption) <= MAX_CAPTION_LEN:
-            try:
-                await self.app.bot.send_photo(
-                    chat_id=chat_id,
-                    photo=InputFile(png, filename="chart.png"),
-                    caption=caption or None,
-                    parse_mode=ParseMode.HTML if caption else None,
-                    reply_markup=reply_markup,
-                    **extra,
-                )
-                return
-            except BadRequest as exc:
-                if not _is_parse_error(exc):
-                    raise
-                logger.warning("Telegram rejected caption HTML (%s); resending plain", exc)
-                await self.app.bot.send_photo(
-                    chat_id=chat_id,
-                    photo=InputFile(png, filename="chart.png"),
-                    caption=_plain(caption) or None,
-                    reply_markup=reply_markup,
-                    **extra,
-                )
-                return
+            await send_html(
+                self.app.bot.send_photo,
+                "caption",
+                caption,
+                chat_id=chat_id,
+                photo=InputFile(png, filename="chart.png"),
+                reply_markup=reply_markup,
+                **extra,
+            )
+            return
         # Caption too long: photo first, then the text (with the buttons) as a message.
         await self.app.bot.send_photo(
             chat_id=chat_id, photo=InputFile(png, filename="chart.png"), **extra
@@ -639,27 +656,18 @@ class HealthBot:
             return
         caption = caption or ""
         if len(caption) > MAX_CAPTION_LEN:
-            caption = caption[: MAX_CAPTION_LEN - 1] + "…"
+            caption = chunk_text(caption, MAX_CAPTION_LEN - 2)[0] + "\n…"  # cut between blocks, tags kept whole
         for cid in self._chat_list(chat_ids):
             extra = self._thread_kwargs(cid, profile)
             try:
-                try:
-                    await self.app.bot.send_document(
-                        chat_id=cid,
-                        document=InputFile(data, filename=p.name),
-                        caption=caption or None,
-                        parse_mode=ParseMode.HTML if caption else None,
-                        **extra,
-                    )
-                except BadRequest as exc:
-                    if not _is_parse_error(exc):
-                        raise
-                    await self.app.bot.send_document(
-                        chat_id=cid,
-                        document=InputFile(data, filename=p.name),
-                        caption=_plain(caption) or None,
-                        **extra,
-                    )
+                await send_html(
+                    self.app.bot.send_document,
+                    "caption",
+                    caption,
+                    chat_id=cid,
+                    document=InputFile(data, filename=p.name),
+                    **extra,
+                )
             except Forbidden as exc:
                 logger.warning("Chat %s blocked the bot or is unreachable: %s", cid, exc)
             except TelegramError as exc:
@@ -692,18 +700,9 @@ class HealthBot:
         """Reply in-thread with a photo; long captions become a separate text message."""
         try:
             if len(caption or "") <= MAX_CAPTION_LEN:
-                try:
-                    await message.reply_photo(
-                        photo=InputFile(png, filename="chart.png"),
-                        caption=caption or None,
-                        parse_mode=ParseMode.HTML if caption else None,
-                    )
-                except BadRequest as exc:
-                    if not _is_parse_error(exc):
-                        raise
-                    await message.reply_photo(
-                        photo=InputFile(png, filename="chart.png"), caption=_plain(caption) or None
-                    )
+                await send_html(
+                    message.reply_photo, "caption", caption, photo=InputFile(png, filename="chart.png")
+                )
                 return
             await message.reply_photo(photo=InputFile(png, filename="chart.png"))
             await self._reply(message, caption)
@@ -721,20 +720,11 @@ class HealthBot:
             return False
         caption = caption or ""
         if len(caption) > MAX_CAPTION_LEN:
-            caption = caption[: MAX_CAPTION_LEN - 1] + "…"
+            caption = chunk_text(caption, MAX_CAPTION_LEN - 2)[0] + "\n…"  # cut between blocks, tags kept whole
         try:
-            try:
-                await message.reply_document(
-                    document=InputFile(data, filename=p.name),
-                    caption=caption or None,
-                    parse_mode=ParseMode.HTML if caption else None,
-                )
-            except BadRequest as exc:
-                if not _is_parse_error(exc):
-                    raise
-                await message.reply_document(
-                    document=InputFile(data, filename=p.name), caption=_plain(caption) or None
-                )
+            await send_html(
+                message.reply_document, "caption", caption, document=InputFile(data, filename=p.name)
+            )
             return True
         except TelegramError as exc:
             logger.error("reply_document failed: %s", exc)
@@ -749,13 +739,15 @@ class HealthBot:
         profiles = self.config.profiles_for_chat(chat_id)
         names = ", ".join(f"<b>{messages.esc(p.name)}</b>" for p in profiles) or "nobody yet"
         lines = [
-            "👋 Hello! I watch a Garmin watch and send simple health updates here.",
-            f"This chat can see: {names}.",
+            messages.header("hello", "Hello", "Garmin health updates"),
+            "",
+            "⌚ I watch a Garmin watch and send simple health updates here.",
+            f"👥 This chat can see: {names}.",
         ]
         if any(p.features.palpitations for p in profiles):
             lines.append(
-                "If you feel your heart racing or fluttering, send /palp (add the time and a note if you like). "
-                "It goes into a diary you can show your doctor; it is not a diagnosis."
+                "❤️ If you feel your heart racing or fluttering, send /palp (add the time and a note if you like). "
+                "<i>It goes into a diary you can show your doctor; it is not a diagnosis.</i>"
             )
         return "\n".join(lines)
 
@@ -780,7 +772,7 @@ class HealthBot:
         if chat_id is None or message is None:
             return
         profiles = self.config.profiles_for_chat(chat_id)
-        lines = ["<b>Profiles this chat can see</b>"]
+        lines = [messages.header("profiles", "Profiles", "who this chat can see"), ""]
         for p in profiles:
             feats = []
             if p.features.palpitations:
@@ -789,14 +781,14 @@ class HealthBot:
                 feats.append("coaching")
             if p.features.doctor_report:
                 feats.append("doctor report")
-            extra = f" — {', '.join(feats)}" if feats else ""
+            extra = f" · {', '.join(feats)}" if feats else ""
             lines.append(
-                f"• <b>{messages.esc(p.name)}</b> ({messages.esc(p.timezone or self.config.timezone)}){extra}"
+                f"👤 <b>{messages.esc(p.name)}</b> ({messages.esc(p.timezone or self.config.timezone)}){extra}"
             )
         if len(profiles) > 1:
             lines.append("")
             lines.append(
-                f"Put the name first to pick one, e.g. <code>/today {messages.esc(profiles[0].name)}</code>."
+                f"<i>Put the name first to pick one, e.g.</i> <code>/today {messages.esc(profiles[0].name)}</code>"
             )
         await self._reply(message, "\n".join(lines))
 
@@ -827,7 +819,7 @@ class HealthBot:
         ctx = await self._begin(update, context)
         if ctx is None:
             return
-        await self._reply(ctx.message, "🧠 Asking the local model… this can take a minute.")
+        await self._reply(ctx.message, "⏳ Asking the local model… <i>this can take a minute.</i>")
         text = await self._run(ctx, "run the analysis", self.service.analyze_now, ctx.profile)
         if text is not None:
             await self._reply(ctx.message, str(text) or "n/a")
@@ -932,7 +924,7 @@ class HealthBot:
         days = _parse_days(ctx.args, DEFAULT_REPORT_DAYS, MAX_REPORT_DAYS)
         await self._reply(
             ctx.message,
-            f"🩺 Generating the {days}-day doctor report for {messages.esc(ctx.profile.name)}… this can take a minute.",
+            f"🩺 Generating the {days}-day doctor report for {messages.esc(ctx.profile.name)}… <i>this can take a minute.</i>",
         )
         files = await self._run(
             ctx, "generate the doctor report", self.service.doctor_report, ctx.profile, days
@@ -950,10 +942,10 @@ class HealthBot:
             await self._reply_document(ctx.message, pdf, caption)
         if csv:
             await self._reply_document(
-                ctx.message, csv, "CSV export of the same diary (one row per episode and per note)"
+                ctx.message, csv, "📄 CSV export of the same diary (one row per episode and per note)"
             )
         if not pdf and not csv:
-            await self._reply(ctx.message, "The report came back empty; nothing to send.")
+            await self._reply(ctx.message, "ℹ️ The report came back empty; nothing to send.")
 
     async def cmd_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         chat_id = self._authorised_chat(update)
@@ -971,17 +963,17 @@ class HealthBot:
                 text = f"Status is unavailable right now ({messages.esc(type(exc).__name__)})."
             pending = self.mfa.pending()
             if pending:
-                text += "\n🔐 Waiting for /mfa code: " + ", ".join(messages.esc(n) for n in pending)
+                text += "\n\n🔐 <b>Waiting for /mfa code</b> · " + ", ".join(messages.esc(n) for n in pending)
             await self._reply(message, text)
             return
-        lines = ["<b>Status</b>"]
+        lines = [messages.header("status", "Status"), ""]
         for p in self.config.profiles_for_chat(chat_id):
             diary = "on" if p.features.palpitations else "off"
             lines.append(
-                f"• <b>{messages.esc(p.name)}</b>: monitoring active, palpitation diary {diary}, "
+                f"👤 <b>{messages.esc(p.name)}</b> · monitoring active, palpitation diary {diary}, "
                 f"times shown in {messages.esc(p.timezone or self.config.timezone)}"
             )
-        lines.append("Use /today for the latest numbers.")
+        lines += ["", "<i>Use /today for the latest numbers.</i>"]
         await self._reply(message, "\n".join(lines))
 
     async def cmd_mfa(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1050,7 +1042,7 @@ class HealthBot:
                 me = None
             if me and not first.lower().endswith(f"@{str(me).lower()}"):
                 return
-        await self._reply(message, "I don't know that command. Send /help for the list.")
+        await self._reply(message, "❓ I don't know that command. Send /help for the list.")
 
     # ------------------------------------------------------------- callbacks
 

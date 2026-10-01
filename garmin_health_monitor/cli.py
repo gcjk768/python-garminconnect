@@ -235,7 +235,7 @@ def cmd_report(args: argparse.Namespace) -> int:
         async def _go() -> None:
             async with bot.app:
                 await bot.send_document(p.telegram_chat_ids, files.pdf_path, messages.doctor_report_caption(p, args.days, files.n_episodes, files.n_symptoms))
-                await bot.send_document(p.telegram_chat_ids, files.csv_path, "CSV export of the same diary")
+                await bot.send_document(p.telegram_chat_ids, files.csv_path, "📄 CSV export of the same diary")
 
         asyncio.run(_go())
         print("sent")

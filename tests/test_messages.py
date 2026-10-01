@@ -22,7 +22,9 @@ from garmin_health_monitor.models import (
 from garmin_health_monitor.palpitations import detect_episodes
 from tests.conftest import DAY, TZ, make_profile, make_snapshot
 
-ALLOWED_TAG_RE = re.compile(r"</?(b|i|code|pre)>|<a href=\"[^\"]*\">|</a>")
+ALLOWED_TAG_RE = re.compile(
+    r"</?(b|i|code|pre|tg-spoiler)>|<a href=\"[^\"]*\">|</a>|<blockquote expandable>|</blockquote>"
+)
 
 
 def _strip_allowed_tags(text: str) -> str:
@@ -36,6 +38,7 @@ def _assert_valid_html(text: str) -> None:
     assert ">" not in stripped, f"unescaped '>' in message: {stripped!r}"
     for tag in ("b", "i", "code", "pre"):
         assert text.count(f"<{tag}>") == text.count(f"</{tag}>"), f"unbalanced <{tag}> tags"
+    assert text.count("<blockquote") == text.count("</blockquote>"), "unbalanced <blockquote>"
 
 
 # ---------------------------------------------------------------------------
@@ -172,7 +175,7 @@ def test_coaching_block_tolerates_odd_shapes():
 
 def test_morning_brief_content(profile, quiet_day, rows_7d, coaching):
     text = M.morning_brief(profile, quiet_day, rows_7d[-1], [], coaching)
-    assert text.startswith("🌅 <b>Good morning, Dad</b>")
+    assert text.startswith("🌅 <b>GOOD MORNING</b> · Dad · Sun 27 Sep\n\n")
     assert "Slept 7h 40m (22:30–06:30)" in text
     assert "score 78 (Good)" in text
     assert "Deep 1h 36m" in text and "REM" in text and "Awake 20m" in text
@@ -181,9 +184,11 @@ def test_morning_brief_content(profile, quiet_day, rows_7d, coaching):
     assert "Body battery on waking" in text
     assert "Training readiness: 62 (Moderate)" in text
     assert "Lowest SpO2 overnight: 92%" in text
-    assert "Yesterday:" in text
+    assert "📅 <b>Yesterday</b> · " in text
     assert "No at-rest heart-rate excursions overnight" in text
     assert "Coaching for today" in text
+    assert "━━━━━━━━━━━━━━━━\n<blockquote expandable>🧭 <b>Coaching for today</b>" in text
+    assert text.endswith("</blockquote>")  # background detail collapsed at the end
     _assert_valid_html(text)
 
 
@@ -210,7 +215,7 @@ def test_morning_brief_falls_back_to_yesterday_rhr(profile, empty_snapshot):
 
 def test_evening_summary_content(profile, episode_day, rows_7d, episodes, symptom, coaching):
     text = M.evening_summary(profile, episode_day, rows_7d, episodes, [symptom], coaching)
-    assert text.startswith("🌙 <b>Evening summary — Dad</b>")
+    assert text.startswith("🌙 <b>EVENING SUMMARY</b> · Dad · Sun 27 Sep\n\n")
     assert "▰▰▰▰▰▰▱▱▱▱ 3,757 / 6,000 (63%)" in text
     assert "7-day avg" in text and ("▲" in text or "▼" in text)
     assert "Distance 2.6 km" in text and "Floors 6" in text and "1,900 kcal" in text
@@ -254,7 +259,7 @@ def test_evening_summary_without_data(profile, empty_snapshot):
 def test_weekly_review_table_and_deltas(profile, rows_7d, rows_prev_week, episodes, coaching):
     coaching.period = "weekly"
     text = M.weekly_review(profile, rows_7d, rows_prev_week, episodes, coaching)
-    assert text.startswith("📊 <b>Weekly review — Dad</b>")
+    assert text.startswith("📊 <b>WEEKLY REVIEW</b> · Dad · ")
     assert "<pre>" in text and "</pre>" in text
     assert "Day     Steps Sleep  RHR  Str   BB" in text
     assert "Sat 26" in text  # last row of the 7-day window
@@ -283,8 +288,8 @@ def test_weekly_review_without_rows(profile):
 def test_today_status_live_snapshot(profile, episode_day, episodes):
     now = datetime(2026, 9, 27, 16, 5, tzinfo=UTC)  # 00:05 local, 35 min after the last sync
     text = M.today_status(profile, episode_day, episodes, now=now)
-    assert "Right now — Dad" in text
-    assert "Steps so far: ▰▰▰▰▰▰▱▱▱▱ 3,757 / 6,000" in text
+    assert text.startswith("📍 <b>RIGHT NOW</b> · Dad · ")
+    assert "👟 <b>Steps so far</b> · ▰▰▰▰▰▰▱▱▱▱ 3,757 / 6,000" in text
     assert "Body battery: 5 (at 23:57)" in text
     assert "Last HR: 67 bpm at 23:58 · resting 58" in text
     assert "Stress avg: 28" in text
@@ -297,7 +302,7 @@ def test_today_status_live_snapshot(profile, episode_day, episodes):
 def test_today_status_warns_when_sync_is_stale(profile, episode_day):
     now = datetime(2026, 9, 27, 21, 5, tzinfo=UTC)  # 5h35m after the last sync
     text = M.today_status(profile, episode_day, [], now=now)
-    assert "⚠️ Watch has not synced for 5h 35m" in text
+    assert "⚠️ <b>Watch has not synced for 5h 35m</b>" in text
 
 
 def test_today_status_without_data(profile, empty_snapshot):
@@ -309,8 +314,8 @@ def test_today_status_without_data(profile, empty_snapshot):
 
 def test_sleep_message(profile, quiet_day):
     text = M.sleep_message(profile, quiet_day)
-    assert "😴 <b>Sleep — Dad</b>" in text
-    assert "Bed 22:30 → wake 06:30 · 7h 40m asleep" in text
+    assert text.startswith("😴 <b>SLEEP</b> · Dad · night to Sun 27 Sep")
+    assert "Bed 22:30 → wake 06:30" in text and "7h 40m asleep" in text
     assert "Score 78 (Good)" in text
     assert "Deep 1h 36m (21%)" in text and "Light 4h 00m (52%)" in text and "REM 1h 45m (23%)" in text
     assert "Woke 2 times · restless moments 18" in text
@@ -327,11 +332,11 @@ def test_sleep_message_without_sleep(profile):
 
 def test_hr_message_lists_excursions_and_fits_caption(profile, episode_day, episodes):
     text = M.hr_message(profile, episode_day, episodes)
-    assert "❤️ <b>Heart rate — Dad</b>" in text
-    assert "Resting 58 bpm (7-day avg 57, ▲1)" in text
+    assert text.startswith("❤️ <b>HEART RATE</b> · Dad · Sun 27 Sep")
+    assert "<b>Resting 58 bpm</b> (7-day avg 57, ▲1)" in text
     assert "Min 50 · Max 127" in text
     assert "Watch abnormal-HR alerts: 2" in text
-    assert "At-rest excursions: 2" in text
+    assert "<b>At-rest excursions</b> · 2" in text
     assert "10:00–10:08 · 8m · peak 127 (base 64, +63) · sustained rise · ✅ felt" in text
     assert len(text) <= M.MAX_CAPTION_LEN
 
@@ -343,8 +348,8 @@ def test_hr_message_without_episodes(profile, quiet_day):
 
 def test_steps_message(profile, episode_day, rows_7d):
     text = M.steps_message(profile, episode_day, rows_7d)
-    assert "👟 <b>Steps — Dad</b>" in text
-    assert "▰▰▰▰▰▰▱▱▱▱ 3,757 / 6,000 (63%)" in text
+    assert text.startswith("👟 <b>STEPS</b> · Dad · Sun 27 Sep")
+    assert "<b>3,757 / 6,000</b> (63%) · ▰▰▰▰▰▰▱▱▱▱" in text
     assert "7-day avg 4,800 · today ▼1,043" in text
     assert "2,243 more to reach the goal" in text
     assert "<pre>" in text and "Goal met on 0 of the last 7 days" in text
@@ -365,14 +370,15 @@ def test_steps_message_without_history(profile, empty_snapshot):
 def test_episode_alert_content(profile, episodes, assessment):
     ep = episodes[0]
     text = M.episode_alert(profile, ep, assessment)
-    assert text.startswith("❤️ <b>Possible palpitation — Dad</b>")
+    assert text.startswith("❤️ <b>POSSIBLE PALPITATION</b> · Dad\n\n")
     assert "📅 Sun 27 Sep · 🕒 10:00–10:08 (8m)" in text  # date + time
-    assert "Peak <b>127 bpm</b> · before 64 bpm (+63)" in text  # heart rate
+    assert "<b>Peak 127 bpm</b> · before 64 bpm (+63)" in text  # heart rate, first and bold
     assert "At rest, 40 steps" in text
     assert "AI view: possible palpitation" in text
     assert "<b>Was it felt?</b> Tap below." in text
     assert "not a diagnosis" in text
-    assert len(text.splitlines()) <= 8  # short enough to read at a glance
+    assert len(text.splitlines()) <= 12  # short enough to read at a glance
+    assert "━━━━━━━━━━━━━━━━" in text and "Seek urgent care" in text  # safety line stays visible
     _assert_valid_html(text)
 
 
@@ -403,12 +409,12 @@ def test_episode_alert_nocturnal_context(profile):
     )
     text = M.episode_alert(profile, ep, None)
     assert "Asleep, 0 steps" in text
-    assert "Peak <b>96 bpm</b>" in text
+    assert "<b>Peak 96 bpm</b>" in text
 
 
 def test_heart_review_lists_time_and_heart_rate(profile, episodes, episode_day):
     text = M.heart_review(profile, episode_day.day, episodes, episode_day)
-    assert text.startswith("❤️ <b>Dad · Sun 27 Sep</b>")
+    assert text.startswith("❤️ <b>HEART REVIEW</b> · Dad · Sun 27 Sep")
     assert "<pre>Time   Peak  Min\n10:00   127    8" in text  # time + heart rate, aligned
     assert "Coaching" not in text and "Fitness" not in text and "n/a" not in text
     _assert_valid_html(text)
@@ -432,15 +438,15 @@ def test_heart_month_hides_only_ruled_out_episodes(profile, episodes):
 
 def test_episodes_list_content(profile, episodes, symptom):
     text = M.episodes_list(profile, episodes, [symptom], 7)
-    assert "🩺 <b>Palpitation diary — Dad</b> — last 7 days" in text
+    assert text.startswith("🩺 <b>PALPITATION DIARY</b> · Dad · last 7 days")
     assert "Detected episodes: 2" in text
     assert "Sun 27 Sep 10:00–10:08 · 8m · peak 127 bpm · ✅ felt · possible palpitation" in text
     assert "Sun 27 Sep 15:30–15:36 · 6m · peak 114 bpm · ❌ not noticed · not assessed yet" in text
     assert "Reported symptoms: 1" in text
     assert "Sun 27 Sep 14:10 — “fluttering after lunch &lt;3 &amp; more” · HR 98 bpm" in text
     assert "about 2.0 per week" in text
-    assert "most common hour" in text
-    assert "felt 1, not noticed 1, unanswered 0" in text
+    assert "most common hour" in text.lower()
+    assert "felt 1, not noticed 1, unanswered 0" in text.lower()
     assert "/report 30" in text
     _assert_valid_html(text)
 
@@ -479,7 +485,7 @@ def test_episodes_list_truncates_long_lists(profile, episodes):
 
 def test_symptom_logged(profile, symptom):
     text = M.symptom_logged(profile, symptom)
-    assert "📝 <b>Symptom logged — Dad</b>" in text
+    assert "📝 <b>SYMPTOM LOGGED</b> · Dad" in text
     assert "Sun 27 Sep 14:10" in text
     assert "Note: “fluttering after lunch &lt;3 &amp; more”" in text
     assert "Heart rate near that time: 98 bpm (at-rest baseline 64, ▲34)" in text
@@ -498,14 +504,14 @@ def test_symptom_logged_without_hr(profile):
 def test_alert_message(severity, emoji):
     alert = Alert(key="k", severity=severity, title="Resting HR <high>", body="RHR 68 & rising", profile="Dad")
     text = M.alert_message(alert)
-    assert text.startswith(f"{emoji} <b>Resting HR &lt;high&gt; (Dad)</b>")
+    assert text.startswith(f"{emoji} <b>Resting HR &lt;high&gt;</b> · Dad\n\n")
     assert "RHR 68 &amp; rising" in text
 
 
 def test_doctor_report_caption(profile):
     text = M.doctor_report_caption(profile, 30, 12, 3)
-    assert "🩺 <b>Doctor report — Dad</b> — last 30 days" in text
-    assert "12 detected episode(s), 3 reported symptom(s)" in text
+    assert text.startswith("🩺 <b>DOCTOR REPORT</b> · Dad · last 30 days")
+    assert "<b>12 detected episode(s)</b> · 3 reported symptom(s)" in text
     assert "not a diagnosis" in text
     assert len(text) <= M.MAX_CAPTION_LEN
 
@@ -524,7 +530,7 @@ def test_help_text_lists_commands_and_admin_extras():
 
 def test_mfa_request(profile):
     text = M.mfa_request(profile)
-    assert "verification code (Dad)" in text
+    assert text.startswith("🔐 <b>GARMIN NEEDS A CODE</b> · Dad")
     assert "<code>/mfa &lt;code&gt;</code>" in text
 
 
@@ -584,11 +590,11 @@ def test_every_message_renders_with_empty_inputs(profile, empty_snapshot):
 def test_rows_with_missing_keys_do_not_crash(profile, quiet_day, coaching):
     rows = [{"day": "2026-09-20"}, {"day": None, "total_steps": "oops"}, {}]
     text = M.evening_summary(profile, quiet_day, rows, [], [], coaching)
-    assert "Evening summary" in text
+    assert "EVENING SUMMARY" in text
     text = M.weekly_review(profile, rows, rows, [], None)
-    assert "Weekly review" in text
+    assert "WEEKLY REVIEW" in text
     text = M.steps_message(profile, quiet_day, rows)
-    assert "Steps — Dad" in text
+    assert "STEPS</b> · Dad" in text
 
 
 def test_assemble_truncates_without_breaking_tags():
@@ -636,7 +642,7 @@ def test_episode_links_compares_with_his_usual():
 
 def test_episode_alert_shows_links_and_tip(profile, episodes):
     text = M.episode_alert(profile, episodes[0], None, "short sleep last night (4.1 h, usual 7.8)")
-    assert "🔍 Possible links: short sleep last night (4.1 h, usual 7.8)" in text
+    assert "🔍 <b>Possible links</b> · short sleep last night (4.1 h, usual 7.8)" in text
     assert M.ALERT_TIP in text
     assert "Possible links" not in M.episode_alert(profile, episodes[0], None)
     _assert_valid_html(text)

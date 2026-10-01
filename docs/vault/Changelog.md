@@ -5,6 +5,9 @@ updated: 2026-10-01
 # Changelog
 
 ## 2026-10-01
+- feat: every Telegram message uses the HTML "card" style (James's standard, MOVIE HUNTER reference): `emoji <b>TITLE</b> · subtitle` header, blank-line blocks, `━━━━` divider, coaching/fitness collapsed in `<blockquote expandable>` at the end, hints in `<i>`, errors in `<code>`. Same fields as before, only layout changed. Dad's episode alert leads with the bold peak bpm and keeps the urgent-care line visible (not collapsed).
+- feat: one send path `send_html` in `garmin_health_monitor/telegram_bot.py` for texts, photos and documents: HTML, then plain-text resend (tags stripped, entities unescaped) on a 400 "can't parse entities". `chunk_text` now cuts between blocks first, never inside a tag/entity, and re-opens `<a href>` / `<blockquote expandable>` with their attributes. Link previews off via PTB `Defaults`.
+- fix: `fitness_lines` double-escaped Garmin status text (`&` showed as `&amp;`).
 - feat: `telegram.command_prefix` in config.yaml (garmin-monitor `g_`, dad-heart-monitor `dad_`): the menu lists `/g_today`, `/dad_today`…; plain names still work. James Channel shows every bot's commands in one `/` menu (no per-topic scope in Telegram), so names must be unique across bots. `_names` + `_post_init` in `garmin_health_monitor/telegram_bot.py`, validated in `config.py`.
 - fix: in a forum group each bot answers only in its own topic (`_authorised_chat` in `garmin_health_monitor/telegram_bot.py` checks `message_thread_id` against `thread_for`). /ask in the SG car topic made both James and Dad bots reply "I don't know that command".
 

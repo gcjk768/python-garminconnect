@@ -89,7 +89,7 @@ class Scheduler:
                 logger.info("%s: backfilled %d day(s)", p.name, n)
             except Exception as exc:  # noqa: BLE001
                 logger.error("%s: backfill failed: %s", p.name, exc)
-                await self._notify_admins(f"⚠️ {messages.esc(p.name)}: startup backfill failed: {messages.esc(str(exc))}")
+                await self._notify_admins(messages.problem("Startup backfill failed", p.name, exc))
         await self.job_poll(context)
 
     async def job_poll(self, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -131,7 +131,7 @@ class Scheduler:
                 await self.bot.send_text(p.telegram_chat_ids, extra, None, p)
         except Exception as exc:  # noqa: BLE001
             logger.exception("%s: monthly summary failed", p.name)
-            await self._notify_admins(f"⚠️ {messages.esc(p.name)}: monthly summary failed: {messages.esc(str(exc))}")
+            await self._notify_admins(messages.problem("Monthly summary failed", p.name, exc))
 
     async def job_workout_nudge(self, context: ContextTypes.DEFAULT_TYPE) -> None:
         p: ProfileConfig = context.job.data  # type: ignore[union-attr]
@@ -145,7 +145,7 @@ class Scheduler:
             logger.info("Database backed up to %s", path)
         except Exception as exc:  # noqa: BLE001
             logger.exception("backup failed")
-            await self._notify_admins(f"⚠️ Nightly database backup failed: {messages.esc(str(exc))}")
+            await self._notify_admins(messages.problem("Nightly database backup failed", None, exc))
 
     async def job_medication(self, context: ContextTypes.DEFAULT_TYPE) -> None:
         p, hhmm = context.job.data  # type: ignore[union-attr]
@@ -157,10 +157,10 @@ class Scheduler:
             files = await asyncio.to_thread(self.service.doctor_report, p, self.config.schedule.doctor_report_days)
             caption = messages.doctor_report_caption(p, self.config.schedule.doctor_report_days, files.n_episodes, files.n_symptoms)
             await self.bot.send_document(p.telegram_chat_ids, files.pdf_path, caption)
-            await self.bot.send_document(p.telegram_chat_ids, files.csv_path, "CSV export of the same diary")
+            await self.bot.send_document(p.telegram_chat_ids, files.csv_path, "📄 CSV export of the same diary")
         except Exception as exc:  # noqa: BLE001
             logger.exception("%s: doctor report job failed", p.name)
-            await self._notify_admins(f"⚠️ {messages.esc(p.name)}: doctor report failed: {messages.esc(str(exc))}")
+            await self._notify_admins(messages.problem("Doctor report failed", p.name, exc))
 
     # ---------------------------------------------------------------- helpers
 
@@ -170,7 +170,7 @@ class Scheduler:
             await self.bot.send_text(p.telegram_chat_ids, text)
         except Exception as exc:  # noqa: BLE001
             logger.exception("%s: %s failed", p.name, label)
-            await self._notify_admins(f"⚠️ {messages.esc(p.name)}: {label} failed: {messages.esc(str(exc))}")
+            await self._notify_admins(messages.problem(f"{label.capitalize()} failed", p.name, exc))
 
     async def deliver(self, p: ProfileConfig, result: PollResult) -> None:
         """Send episode alerts and rule alerts from a poll result (respecting quiet hours)."""
@@ -216,12 +216,12 @@ class Scheduler:
         hours = (now - since).total_seconds() / 3600
         tz = p.timezone or self.config.timezone
         if "login" in error.lower():
-            why = "Garmin login is failing. If this lasts, run <code>garmin-monitor login</code> for this profile."
+            why = "🔑 Garmin login is failing. If this lasts, run <code>garmin-monitor login</code> for this profile."
         else:
-            why = "Garmin's servers seem to be down."
+            why = "🌐 Garmin's servers seem to be down."
         await self._notify_admins(
-            f"⚠️ <b>{messages.esc(p.name)}: no Garmin data since {since.astimezone(get_tz(tz)):%H:%M}</b> "
-            f"({hours:.0f}h)\n{why}\nAlerts are paused until it is back."
+            f"⚠️ <b>No Garmin data since {since.astimezone(get_tz(tz)):%H:%M}</b> · {messages.esc(p.name)} "
+            f"({hours:.0f}h)\n\n{why}\n⏸ <b>Alerts are paused until it is back.</b>"
         )
 
     async def _poll_ok(self, p: ProfileConfig) -> None:
@@ -239,7 +239,7 @@ class Scheduler:
             day += timedelta(days=1)
         if p.name in self._down_alerted:
             self._down_alerted.discard(p.name)
-            await self._notify_admins(f"✅ <b>{messages.esc(p.name)}: Garmin data is back.</b> Nothing lost; missed episodes are checked now.")
+            await self._notify_admins(f"✅ <b>Garmin data is back</b> · {messages.esc(p.name)}\n\n▶️ Nothing lost; missed episodes are checked now.")
 
     async def _notify_admins(self, text: str) -> None:
         ids = self.config.telegram.admin_chat_ids

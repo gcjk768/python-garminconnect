@@ -186,8 +186,8 @@ def test_messages_render(svc):
     text, png = service.hr_chart(profile)
     assert text and png and png[:8] == b"\x89PNG\r\n\x1a\n"
     assert "episode" in service.episodes_text(profile, 7).lower()
-    assert "Analysis" in service.analyze_now(profile)
-    assert "Garmin Health Monitor" in service.status_text()
+    assert service.analyze_now(profile).startswith("🧠 <b>ANALYSIS</b> · Dad")
+    assert service.status_text().startswith("🛠 <b>GARMIN HEALTH MONITOR</b> · status")
     assert service.yesterday_text(profile)
 
 
@@ -304,7 +304,7 @@ async def test_scheduler_garmin_outage_alerts_after_2h_once_then_all_clear(svc):
     await sched.deliver(profile, down)
     assert bot.send_text.await_count == 1  # alerted once
     text = bot.send_text.await_args.args[1]
-    assert "no Garmin data since" in text and "servers seem to be down" in text
+    assert "<b>No Garmin data since 20:00</b> · Dad" in text and "servers seem to be down" in text
     assert bot.send_text.await_args.args[0] == service.config.telegram.admin_chat_ids
     await sched.deliver(profile, PollResult(profile="Dad", snapshot=None))
     assert "Garmin data is back" in bot.send_text.await_args.args[1]
@@ -359,7 +359,7 @@ def test_heart_only_profile_weekly_is_palpitation_table(svc):
     service.poll(profile)
     profile.features.heart_review = True
     text = service.weekly_review_text(profile)
-    assert text.startswith("❤️ <b>Dad · Week ") and "<pre>Date    Time   Peak  Min" in text
+    assert text.startswith("❤️ <b>HEART</b> · Dad · Week ") and "<pre>Date    Time   Peak  Min" in text
     assert "Coaching" not in text
 
 
@@ -397,7 +397,8 @@ def test_monthly_summary_heart_calendar_and_ai_report(svc):
     clock["now"] = local(DAY.replace(day=1) + timedelta(days=32), 9, 0).replace(day=1)  # 1st of next month
     png, caption, extra = service.monthly_summary(profile)
     assert png[:8] == b"\x89PNG\r\n\x1a\n"
-    assert caption.startswith("❤️ <b>Dad's heart · ") and "🟥" in caption and "💊 Metoprolol from" in caption
+    assert caption.startswith("❤️ <b>HEART MONTH</b> · Dad · ") and "🟥" in caption
+    assert "💊 <b>Metoprolol</b> from" in caption
     assert "Why it may happen" in extra and "Sleep score 60 vs 74." in extra and "call 995" in extra
 
 
@@ -406,7 +407,7 @@ def test_monthly_summary_progress_for_normal_profile(svc):
     service.backfill(profile, 3)
     clock["now"] = local(DAY.replace(day=1) + timedelta(days=32), 9, 0).replace(day=1)
     png, caption, extra = service.monthly_summary(profile)
-    assert png[:8] == b"\x89PNG\r\n\x1a\n" and caption.startswith("📈 <b>Dad · ") and "👟 Steps" in caption
+    assert png[:8] == b"\x89PNG\r\n\x1a\n" and caption.startswith("📈 <b>MONTH IN REVIEW</b> · Dad · ") and "👟 Steps" in caption
     assert extra is None
 
 
@@ -414,7 +415,7 @@ def test_workout_nudge_only_when_behind(svc):
     service, profile, _, _ = svc
     profile.goals = "3 workouts a week"
     text = service.workout_nudge_text(profile)
-    assert text is None or text.startswith("🏃 <b>0 of 3 workouts this week</b>")
+    assert text is None or "🏃 <b>0 of 3 workouts this week</b>" in text
     profile.goals = "walk more"
     assert service.workout_nudge_text(profile) is None
 

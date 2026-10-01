@@ -13,6 +13,8 @@ Telegram bot + scheduler on the NAS that pulls Garmin data for the family, detec
 - Routing: Dad's profile sends to his chat and James's (`config.example.yaml`); `/palp` from Dad's chat is copied to the admins (`garmin_health_monitor/telegram_bot.py::_log_symptom`).
 - Deploy: `Dockerfile`, `docker-compose.yaml` → NAS `/volume1/docker/garmin-monitor` (Dockge). Secrets in that folder's `.env`: HEART_BOT_TOKEN, HEART_ADMIN_CHAT, MY_GARMIN_*, CLAUDE_CODE_OAUTH_TOKEN.
 - Output format: `garmin_health_monitor/messages.py::_compact` hides n/a; `coaching_block` is the short card.
+- Message style: HTML cards built in [garmin_health_monitor/messages.py](../../garmin_health_monitor/messages.py) — `header()` (emoji per type from `SECTION_TITLES`), `card()`, `background()` (divider + `<blockquote expandable>`), `problem()` (admin errors); every dynamic value goes through `esc()`.
+- Sending: [garmin_health_monitor/telegram_bot.py](../../garmin_health_monitor/telegram_bot.py) `send_html` is the only HTML send path (plain-text fallback on parse errors); `chunk_text` splits at 4000 between blocks; link previews disabled via `Defaults`.
 - Dad: NAS stack `dad-heart-monitor` (config in its `config/config.yaml`, heart-only features); vault log via `garmin_health_monitor/vault.py`.
 - Docs: `README.md` (public overview) and `docs/architecture.drawio` (diagram source; export to `docs/architecture.drawio.svg`).
 - Command prefix: `telegram.command_prefix` ([garmin_health_monitor/config.py](../../garmin_health_monitor/config.py)) prefixes every menu command so the two stacks (and other bots) don't share names in James Channel.

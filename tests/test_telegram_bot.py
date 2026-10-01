@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import threading
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
@@ -13,13 +14,16 @@ import pytest
 from telegram import InlineKeyboardMarkup
 from telegram.error import BadRequest
 
+from garmin_health_monitor import messages
 from garmin_health_monitor.telegram_bot import (
     FELT_CALLBACK_RE,
     HealthBot,
     MfaBroker,
+    _plain,
     build_felt_keyboard,
     chunk_text,
     parse_symptom_args,
+    send_html,
 )
 from tests.conftest import TZ, make_app_config, make_profile
 
@@ -509,7 +513,7 @@ async def test_report_sends_two_documents(bot, service):
     first, second = upd.message.reply_document.await_args_list
     assert first.kwargs["document"].filename.endswith(".pdf")
     assert second.kwargs["document"].filename.endswith(".csv")
-    assert "Doctor report" in first.kwargs["caption"]
+    assert "DOCTOR REPORT" in first.kwargs["caption"]
     assert "3 detected episode" in first.kwargs["caption"]
     assert (
         "not a diagnosis" in first.kwargs["caption"].lower()
@@ -723,6 +727,84 @@ def test_chunk_text_reopens_tag_across_boundary():
     for c in chunks:
         assert len(c) <= 120
         assert c.startswith("<i>") and c.endswith("</i>")
+
+
+_ANY_TAG = re.compile(r"<(/?)([a-z][a-z-]*)(?:\s[^>]*)?>")
+
+
+def _balanced(chunk: str) -> bool:
+    """Every tag opened in ``chunk`` is closed in it, in order, and no ``<``/``&`` is cut in half."""
+    stack: list[str] = []
+    for m in _ANY_TAG.finditer(chunk):
+        if m.group(1):
+            if not stack or stack.pop() != m.group(2):
+                return False
+        else:
+            stack.append(m.group(2))
+    rest = _ANY_TAG.sub("", chunk)
+    return not stack and "<" not in rest and ">" not in rest and not re.search(r"&[a-z]*$", rest)
+
+
+def test_chunk_text_splits_between_blocks():
+    blocks = [f"🎞 <b>Block {i}</b> · one-liner\n🔑 <code>{i:04d}</code>" for i in range(200)]
+    chunks = chunk_text("\n\n".join(blocks), 1000)
+    assert len(chunks) > 1
+    for c in chunks:
+        assert len(c) <= 1000 and _balanced(c)
+        assert c.startswith("🎞 <b>Block ") and c.endswith("</code>")  # whole blocks only
+    assert sum(c.count("<b>Block ") for c in chunks) == 200
+
+
+def test_chunk_text_never_splits_inside_a_tag():
+    link = '<a href="http://192.168.1.27:7878/very/long/path">Home</a>'
+    quote = "<blockquote expandable>⚙️ <b>Background</b>\n" + " ".join(["x&amp;y"] * 400) + "</blockquote>"
+    text = "🎬 <b>MOVIE</b> · test\n\n" + "  ·  ".join([link] * 30) + "\n\n━━━━━━━━━━━━━━━━\n" + quote
+    for limit in (200, 333, 1000, 4000):
+        chunks = chunk_text(text, limit)
+        assert all(len(c) <= limit for c in chunks), limit
+        assert all(_balanced(c) for c in chunks), limit
+        # an oversized blockquote is closed at the cut and re-opened (attributes kept) in the next piece
+        opened = [c for c in chunks if "<blockquote expandable>" in c]
+        assert len(opened) >= (2 if limit < 1000 else 1)
+    plain = "".join(_plain(c) for c in chunk_text(text, 333))
+    assert plain.count("x&y") == 400 and plain.count("Home") == 30  # nothing lost
+
+
+def test_plain_strips_all_tags_and_unescapes():
+    html = '❤️ <b>Peak &lt;140&gt; bpm</b>\n<blockquote expandable><a href="x">A &amp; B</a></blockquote>'
+    assert _plain(html) == "❤️ Peak <140> bpm\nA & B"
+
+
+def test_dynamic_text_is_escaped_in_cards():
+    p = make_profile(name="<Dad & Co>")
+    head = messages.header("episode", "Possible palpitation", p.name)
+    assert head == "❤️ <b>POSSIBLE PALPITATION</b> · &lt;Dad &amp; Co&gt;"
+    note = messages.problem("Backup failed", "<x>", "disk <full> & gone")
+    assert "<code>disk &lt;full&gt; &amp; gone</code>" in note and "· &lt;x&gt;" in note
+    bg = messages.background("<i>ok</i>", None)
+    assert bg == "━━━━━━━━━━━━━━━━\n<blockquote expandable><i>ok</i></blockquote>"
+    assert messages.background(None, "") is None
+
+
+async def test_parse_error_falls_back_to_plain_text_for_captions(bot, tmp_path):
+    fake = AsyncMock(name="tgbot")
+    fake.send_photo.side_effect = [BadRequest("Bad Request: can't parse entities"), None]
+    bot.app.bot = fake
+    await bot.send_photo([111], b"\x89PNG", "❤️ <b>Peak &lt;140&gt;</b> <broken")
+    first, second = (c.kwargs for c in fake.send_photo.await_args_list)
+    assert first["parse_mode"] == "HTML" and second["parse_mode"] is None
+    assert second["caption"].startswith("❤️ Peak <140>")  # readable, nothing lost
+
+
+async def test_non_parse_bad_request_is_not_retried():
+    send = AsyncMock(side_effect=BadRequest("chat not found"))
+    with pytest.raises(BadRequest):
+        await send_html(send, "text", "<b>x</b>", chat_id=1)
+    assert send.await_count == 1
+
+
+def test_link_previews_are_disabled_for_every_message(bot):
+    assert bot.app.bot.defaults.link_preview_options.is_disabled is True
 
 
 async def test_send_text_chunks_and_uses_thread(bot):
