@@ -873,3 +873,17 @@ async def test_med_button_from_stranger_is_ignored(bot, service):
     upd = make_callback_update(STRANGER_CHAT, "med:dad:2026-09-29:0900")
     await bot.cb_med(upd, make_context())
     assert not service.called("mark_med_taken")
+
+
+async def test_forum_bot_ignores_other_topics(tmp_path, service):
+    cfg = make_app_config(tmp_path)
+    cfg.profiles[0].telegram_threads = {111: 77}
+    hb = HealthBot(cfg, service)
+    other = make_update(111, "/ask ev brand")
+    other.effective_message.message_thread_id = 2763
+    await hb.cmd_unknown(other, make_context())
+    assert not replies(other)
+    own = make_update(111, "/ask ev brand")
+    own.effective_message.message_thread_id = 77
+    await hb.cmd_unknown(own, make_context())
+    assert replies(own)

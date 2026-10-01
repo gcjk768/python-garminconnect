@@ -1,8 +1,11 @@
 ---
 tags: [active]
-updated: 2026-09-29
+updated: 2026-10-01
 ---
 # Changelog
+
+## 2026-10-01
+- fix: in a forum group each bot answers only in its own topic (`_authorised_chat` in `garmin_health_monitor/telegram_bot.py` checks `message_thread_id` against `thread_for`). /ask in the SG car topic made both James and Dad bots reply "I don't know that command".
 
 ## 2026-09-29 — Safety + routine features ("do all")
 - Dad alerts: `alerts.only: [no_sync, low_hr, garmin_abnormal_hr]`; watch not synced 6h; low HR < 40 bpm for 10 min awake (PLACEHOLDER, confirm with doctor; backtest on Sept: 0 days).

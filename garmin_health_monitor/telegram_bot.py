@@ -391,6 +391,11 @@ class HealthBot:
             user = getattr(getattr(update, "effective_user", None), "id", None)
             logger.info("Ignoring update from unauthorised chat %s (user %s)", chat_id, user)
             return None
+        # Several bots share one forum group: answer only in this bot's own topic.
+        topic = self.config.thread_for(chat_id)
+        msg = getattr(update, "effective_message", None)
+        if topic is not None and getattr(msg, "message_thread_id", None) != topic:
+            return None
         return chat_id
 
     def _is_admin(self, chat_id: int) -> bool:
