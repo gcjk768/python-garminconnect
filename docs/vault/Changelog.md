@@ -1,8 +1,11 @@
 ---
 tags: [active]
-updated: 2026-09-30
+updated: 2026-10-01
 ---
 # Changelog
+
+## 2026-10-01
+- fix: in a forum group each bot answers only in its own topic (`_authorised_chat` in `garmin_health_monitor/telegram_bot.py` checks `message_thread_id` against `thread_for`). /ask in the SG car topic made both James and Dad bots reply "I don't know that command".
 
 ## 2026-09-30 — README + architecture diagram
 - New `README.md` (problem, engineering highlights, flow, stack, setup, limits; no real readings or names).
