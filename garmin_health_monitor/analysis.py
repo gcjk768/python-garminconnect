@@ -825,6 +825,17 @@ def assessment_from_dict(
 # ---------------------------------------------------------------------------
 
 
+def _memory_block(memory: str) -> str:
+    """The vault excerpt (``vault.memory``) as a prompt section; "" when there is none."""
+    if not memory:
+        return ""
+    return (
+        "\nYour own log (Obsidian vault, newest first): what you already did and learned. Use it for "
+        "recent episodes and trends; do not repeat advice or alerts it shows were already given unless "
+        "the numbers changed. Context only, not new measurements:\n" + memory
+    )
+
+
 def daily_coaching(
     client: Any,
     profile: ProfileConfig,
@@ -832,6 +843,7 @@ def daily_coaching(
     today: DaySnapshot | None,
     episodes_today: list[Episode] | None,
     symptoms_today: list[SymptomReport] | None,
+    memory: str = "",
 ) -> CoachingAdvice:
     """Ask the model for today's "do more / do less" advice."""
     tz = _tz(profile, today.tz if today else None)
@@ -845,7 +857,7 @@ def daily_coaching(
         f"Palpitations the person reported today: {_dumps(symptoms) if symptoms else 'none'}\n"
         "Write the summary, 2-4 do_more items, 2-4 do_less items, watch_outs and heart_note. "
         "Remember: not a diagnosis; plain language; only these numbers."
-    )
+    ) + _memory_block(memory)
     logger.debug("daily_coaching prompt for %s: %d chars", profile.name, len(user))
     data = client.chat_json(_coaching_system(profile, "daily"), user, COACHING_SCHEMA)
     return coaching_from_dict(data, model=getattr(client, "model", "ollama"), period="daily")
@@ -857,6 +869,7 @@ def weekly_review(
     rows_this_week: list[dict[str, Any]],
     rows_prev_week: list[dict[str, Any]],
     episodes_week: list[Episode] | None,
+    memory: str = "",
 ) -> CoachingAdvice:
     """Ask the model to compare this week with the previous one (``period="weekly"``)."""
     tz = _tz(profile)
@@ -882,7 +895,7 @@ def weekly_review(
         "Only call something a pattern when it shows up on at least 3 days, and quote the count, "
         "for example 'under 6000 steps on 4 of 7 days'. Never invent a suggestion the data does not "
         "support. If fewer than 5 days have data, say so in the summary."
-    )
+    ) + _memory_block(memory)
     data = client.chat_json(_coaching_system(profile, "weekly"), user, COACHING_SCHEMA)
     return coaching_from_dict(data, model=getattr(client, "model", "ollama"), period="weekly")
 
@@ -892,6 +905,7 @@ def build_episode_prompt(
     episode: Episode,
     snapshot: DaySnapshot | None,
     recent_symptoms: list[SymptomReport] | None,
+    memory: str = "",
 ) -> str:
     """The user message for :func:`assess_episode` (exposed for tests and debugging)."""
     tz = _tz(profile, snapshot.tz if snapshot else None)
@@ -942,7 +956,7 @@ def build_episode_prompt(
         f"Steps threshold used for 'at rest': {profile.palpitations.max_steps_in_window} steps per 15 min.\n"
         "Decide the category, give a confidence between 0 and 1, a short calm reasoning, and the "
         "one-sentence doctor_note built from these numbers. Not a diagnosis."
-    )
+    ) + _memory_block(memory)
 
 
 def assess_episode(
@@ -951,9 +965,10 @@ def assess_episode(
     episode: Episode,
     snapshot: DaySnapshot | None,
     recent_symptoms: list[SymptomReport] | None,
+    memory: str = "",
 ) -> EpisodeAssessment:
     """Ask the model to classify one episode and write the doctor note."""
-    user = build_episode_prompt(profile, episode, snapshot, recent_symptoms)
+    user = build_episode_prompt(profile, episode, snapshot, recent_symptoms, memory)
     data = client.chat_json(_episode_system(profile), user, EPISODE_SCHEMA)
     result = assessment_from_dict(
         data, getattr(client, "model", "ollama"), episode, profile, recent_symptoms or []
@@ -1451,9 +1466,10 @@ def heart_month_facts(
     }
 
 
-def heart_month_report(client: Any, facts: dict[str, Any]) -> dict[str, Any]:
+def heart_month_report(client: Any, facts: dict[str, Any], memory: str = "") -> dict[str, Any]:
     """Claude's plain-English reading of :func:`heart_month_facts` (raises LLMError on failure)."""
-    data = client.chat_json(MONTH_REPORT_SYSTEM, "Data (JSON):\n" + _dumps(facts), MONTH_REPORT_SCHEMA)
+    user = "Data (JSON):\n" + _dumps(facts) + _memory_block(memory)
+    data = client.chat_json(MONTH_REPORT_SYSTEM, user, MONTH_REPORT_SCHEMA)
     data = data if isinstance(data, dict) else {}
     return {
         "summary": _clean_str(data.get("summary"), 400),

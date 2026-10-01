@@ -195,6 +195,12 @@ class MonitorService:
             if is_new:
                 new.append(stored)
                 logger.info("%s: new %s episode %s peak %d (conf %.2f)", profile.name, stored.kind, stored.start, stored.peak_hr, stored.confidence)
+                if notify:  # not for backfilled history
+                    s, e = to_local(stored.start, profile.timezone), to_local(stored.end, profile.timezone)
+                    self.log_event(profile, "💓", "Possible palpitation",
+                                   f"{s:%H:%M}–{e:%H:%M}, peak {stored.peak_hr} bpm (before {round(stored.baseline_hr)}), "
+                                   f"{round(stored.duration_min)} min, {'asleep' if stored.asleep else 'at rest'}",
+                                   f"Episodes/{s.date().isoformat()}")
             if not notify and stored.notified_at is None:
                 self.storage.mark_episode_notified(stored.id)  # historical: no alert
                 continue
@@ -214,8 +220,17 @@ class MonitorService:
         try:
             vault.write_day(self.config.vault_dir, profile.name, day, self.storage.get_episodes(profile.name, start, end),
                             profile.timezone or self.config.timezone, self.today(profile))
-        except OSError as exc:
+        except Exception as exc:  # noqa: BLE001 - the vault never breaks monitoring
             logger.warning("%s: vault write failed: %s", profile.name, exc)
+
+    def log_event(self, profile: ProfileConfig | None, emoji: str, what: str, detail: str = "", entity: str = "") -> None:
+        """One line in today's vault Activity note (no-op without ``vault_dir``; never raises)."""
+        tz = (profile.timezone if profile else None) or self.config.timezone
+        vault.log(self.config.vault_dir, to_local(self.clock(), tz), emoji, what, detail, entity)
+
+    def memory(self) -> str:
+        """Capped newest-first vault excerpt for LLM prompts ("" without ``vault_dir``)."""
+        return vault.memory(self.config.vault_dir)
 
     def _enrich_symptoms(self, profile: ProfileConfig, snap: DaySnapshot) -> None:
         start, end = local_day_bounds(snap.day, profile.timezone)
@@ -244,14 +259,20 @@ class MonitorService:
         window = (ep.start - timedelta(days=3), ep.end + timedelta(hours=6))
         symptoms = self.storage.get_symptoms(profile.name, *window)
         try:
-            result = analysis.assess_episode(self.llm, profile, ep, snap, symptoms)
+            result = analysis.assess_episode(self.llm, profile, ep, snap, symptoms, self.memory())
         except LLMError as exc:
             logger.warning("%s: episode assessment failed: %s", profile.name, exc)
+            self.log_event(profile, "⚠️", "AI view failed", str(exc)[:120])
             return None
         self.storage.update_episode_assessment(ep.id, result.assessment, result.confidence, result.reasoning, result.doctor_note, result.model)
         ep.llm_assessment, ep.llm_confidence = result.assessment, result.confidence
         ep.llm_reasoning, ep.doctor_note, ep.llm_model = result.reasoning, result.doctor_note, result.model
-        self._log_to_vault(profile, to_local(ep.start, profile.timezone).date())
+        local_start = to_local(ep.start, profile.timezone)
+        self.log_event(profile, "🧠", "AI view",
+                       f"{local_start:%H:%M} episode: {result.assessment.replace('_', ' ')} "
+                       f"({result.confidence:.0%}). {result.reasoning}",
+                       f"Episodes/{local_start.date().isoformat()}")
+        self._log_to_vault(profile, local_start.date())
         return result
 
     def assess_pending(self, profile: ProfileConfig, limit: int = 10) -> int:
@@ -323,13 +344,27 @@ class MonitorService:
         advice: CoachingAdvice | None = None
         if self.llm is not None:
             try:
-                advice = analysis.daily_coaching(self.llm, profile, rows, snap, episodes, symptoms)
+                advice = analysis.daily_coaching(self.llm, profile, rows, snap, episodes, symptoms, self.memory())
             except LLMError as exc:
                 logger.warning("%s: coaching via %s failed: %s", profile.name, describe_backend(self.llm), exc)
         if advice is None:
             advice = analysis.rule_based_coaching(profile, rows, snap, episodes_today=episodes, symptoms_today=symptoms)
         self.storage.save_analysis(profile.name, kind, snap.day, advice.model, advice.to_dict())
+        self._log_day(profile, snap, advice)
         return advice
+
+    def _log_day(self, profile: ProfileConfig, snap: DaySnapshot, advice: CoachingAdvice) -> None:
+        """``Days/<day>.md``: the day's numbers + coaching, plus an Activity line."""
+        if not self.config.vault_dir:
+            return
+        day = analysis.compact_day(analysis.snapshot_to_row(snap))
+        nums = " · ".join(f"{k} {v}" for k, v in day.items() if v is not None and k not in {"day", "activities"})
+        body = ["## Numbers", nums or "no data", *(f"- {a}" for a in day["activities"] if a),
+                "", f"## Coaching ({advice.model or 'rules'})", advice.summary,
+                *(f"- Do more: {x}" for x in advice.do_more), *(f"- Do less: {x}" for x in advice.do_less),
+                *(f"- Watch: {x}" for x in advice.watch_outs)]
+        vault.write_note(self.config.vault_dir, "Days", snap.day, f"{snap.day:%a %d %b %Y} ({profile.name})", body, self.today(profile))
+        self.log_event(profile, "🏋️", "Coaching", advice.summary, f"Days/{snap.day.isoformat()}")
 
     def stored_coaching(self, profile: ProfileConfig, day: date) -> CoachingAdvice | None:
         rec = self.storage.get_latest_analysis(profile.name, "daily", day)
@@ -403,8 +438,9 @@ class MonitorService:
         coaching: CoachingAdvice | None = None
         if self.llm is not None and profile.features.daily_coaching:
             try:
-                coaching = analysis.weekly_review(self.llm, profile, this_week, prev_week, episodes)
+                coaching = analysis.weekly_review(self.llm, profile, this_week, prev_week, episodes, self.memory())
                 self.storage.save_analysis(profile.name, "weekly", today, coaching.model, coaching.to_dict())
+                self.log_event(profile, "📅", "Weekly review", coaching.summary)
             except LLMError as exc:
                 logger.warning("%s: weekly review via %s failed: %s", profile.name, describe_backend(self.llm), exc)
         return messages.weekly_review(profile, this_week, prev_week, episodes, coaching)
@@ -515,7 +551,9 @@ class MonitorService:
             if self.llm is not None:
                 try:
                     facts = analysis.heart_month_facts(profile, title, shown, rows)
-                    extra = messages.heart_month_report_text(profile, title, analysis.heart_month_report(self.llm, facts))
+                    month_report = analysis.heart_month_report(self.llm, facts, self.memory())
+                    extra = messages.heart_month_report_text(profile, title, month_report)
+                    self.log_event(profile, "🗓", "Monthly report", f"{title}: {month_report['summary']}")
                 except LLMError as exc:
                     logger.warning("%s: monthly AI report failed: %s", profile.name, exc)
             return png, caption, extra
@@ -557,6 +595,7 @@ class MonitorService:
         key = self._med_key(profile, day, hhmm)
         if not self.storage.kv_get(key):
             self.storage.kv_set(key, self.clock().isoformat())
+            self.log_event(profile, "💊", "Medicine taken", f"{hhmm} dose of {day.isoformat()}")
         taken = datetime.fromisoformat(str(self.storage.kv_get(key)))
         return to_local(taken, profile.timezone).strftime("%H:%M")
 
@@ -608,6 +647,10 @@ class MonitorService:
                 logger.warning("%s: symptom extraction via %s failed: %s", profile.name, describe_backend(self.llm), exc)
         rep.red_flag = analysis.has_red_flag(rep.note, rep.extracted)
         self.storage.add_symptom(rep)
+        local_evt = to_local(event_time, profile.timezone)
+        self.log_event(profile, "📝", "Symptom logged",
+                       f"{local_evt:%H:%M} {rep.note}{' · RED FLAG' if rep.red_flag else ''}",
+                       f"Episodes/{local_evt.date().isoformat()}" if rep.episode_id else "")
         return messages.symptom_logged(profile, rep)
 
     def set_felt(self, profile: ProfileConfig | None, episode_id: int, felt: bool) -> str:

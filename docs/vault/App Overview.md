@@ -1,6 +1,6 @@
 ---
 tags: [active]
-updated: 2026-10-01
+updated: 2026-10-02
 ---
 # App Overview
 
@@ -15,7 +15,8 @@ Telegram bot + scheduler on the NAS that pulls Garmin data for the family, detec
 - Output format: `garmin_health_monitor/messages.py::_compact` hides n/a; `coaching_block` is the short card.
 - Message style: HTML cards built in [garmin_health_monitor/messages.py](../../garmin_health_monitor/messages.py) — `header()` (emoji per type from `SECTION_TITLES`), `card()`, `background()` (divider + `<blockquote expandable>`), `problem()` (admin errors); every dynamic value goes through `esc()`.
 - Sending: [garmin_health_monitor/telegram_bot.py](../../garmin_health_monitor/telegram_bot.py) `send_html` is the only HTML send path (plain-text fallback on parse errors); `chunk_text` splits at 4000 between blocks; link previews disabled via `Defaults`.
-- Dad: NAS stack `dad-heart-monitor` (config in its `config/config.yaml`, heart-only features); vault log via `garmin_health_monitor/vault.py`.
+- Dad: NAS stack `dad-heart-monitor` (config in its `config/config.yaml`, heart-only features).
+- Vault (movement log + memory): [garmin_health_monitor/vault.py](../../garmin_health_monitor/vault.py) writes `Activity/` (one line per event), `Episodes/`, `Days/`, `Home.md` under `vault_dir` (each stack's `config/config.yaml`, mounted at `/vault`: James `/volume1/James/Obsidian/Garmin`, Dad `/volume1/James/Obsidian/Dad Heart`). Events go through `MonitorService.log_event` ([garmin_health_monitor/service.py](../../garmin_health_monitor/service.py)) and [garmin_health_monitor/scheduler.py](../../garmin_health_monitor/scheduler.py); `vault.memory()` (≤4,000 chars, newest first) is fed into the coaching, weekly, episode-assessment and monthly prompts via `analysis._memory_block` ([garmin_health_monitor/analysis.py](../../garmin_health_monitor/analysis.py)). Best-effort, never raises.
 - Docs: `README.md` (public overview) and `docs/architecture.drawio` (diagram source; export to `docs/architecture.drawio.svg`).
 - Command prefix: `telegram.command_prefix` ([garmin_health_monitor/config.py](../../garmin_health_monitor/config.py)) prefixes every menu command so the two stacks (and other bots) don't share names in James Channel.
 - Topic filter: [garmin_health_monitor/telegram_bot.py](../../garmin_health_monitor/telegram_bot.py) `_authorised_chat` ignores messages from other forum topics (the profile's `telegram_threads`), so shared-group commands only reach the bot whose topic they were sent in.

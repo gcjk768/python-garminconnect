@@ -210,7 +210,7 @@ class AppConfig:
     profiles: list[ProfileConfig]
     log_level: str = "INFO"
     llm: LLMConfig = field(default_factory=LLMConfig)
-    vault_dir: str | None = None  # Obsidian vault logging every possible palpitation (optional)
+    vault_dir: str | None = None  # Obsidian vault: movement log + AI memory (optional; see vault.py)
     backup_dir: str | None = None  # nightly copies of the database (optional; keeps the newest BACKUP_KEEP)
 
     def thread_for(self, chat_id: int, profile: ProfileConfig | None = None) -> int | None:

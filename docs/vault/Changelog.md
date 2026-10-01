@@ -1,8 +1,15 @@
 ---
 tags: [active]
-updated: 2026-10-01
+updated: 2026-10-02
 ---
 # Changelog
+
+## 2026-10-02 — Vault movement log + memory (NAS app-vault standard)
+- feat: `garmin_health_monitor/vault.py` now follows the standard: `Activity/YYYY-MM-DD.md` gets one line per event (`- HH:MM emoji **what** · detail · [[entity]]`, SGT); entity notes `Episodes/` (palpitation table, rebuilt from the DB) and new `Days/` (daily numbers + coaching) keep an append-only `## History` that survives rewrites; `Home.md` is a MOC (latest activity, days, episodes by month, other notes such as Medication). Atomic writes, chmod 664.
+- Events logged (`MonitorService.log_event`, `Scheduler`): possible palpitation found, AI view (and failures), episode alert / rule alert sent, coaching, weekly review, monthly report, symptom logged (red flag marked), medicine taken, scheduled report / workout nudge sent, Garmin down / back.
+- feat: memory. `vault.memory()` returns a newest-first excerpt capped at 4,000 chars (half Activity, rest entity notes without frontmatter/History); passed as `memory=` into `analysis.daily_coaching`, `weekly_review`, `assess_episode` and `heart_month_report` via `_memory_block` ("do not repeat advice or alerts already given").
+- Best-effort: every vault function catches and logs; a broken vault never stops a poll or an alert (`tests/test_vault.py`).
+- James's stack gets its own vault `/volume1/James/Obsidian/Garmin` (`vault_dir: /vault` + compose mount); Dad keeps `/volume1/James/Obsidian/Dad Heart`. Home links are now path-qualified (`[[Episodes/2026-09-27|2026-09-27]]`) because Activity and Episodes share date names.
 
 ## 2026-10-01
 - feat: every Telegram message uses the HTML "card" style (James's standard, MOVIE HUNTER reference): `emoji <b>TITLE</b> · subtitle` header, blank-line blocks, `━━━━` divider, coaching/fitness collapsed in `<blockquote expandable>` at the end, hints in `<i>`, errors in `<code>`. Same fields as before, only layout changed. Dad's episode alert leads with the bold peak bpm and keeps the urgent-care line visible (not collapsed).

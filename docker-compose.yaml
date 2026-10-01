@@ -16,4 +16,5 @@ services:
       # code mounted over the baked-in copy: updating = upload files + Restart (no rebuild)
       - ./garmin_health_monitor:/app/garmin_health_monitor:ro
       - /volume1/James/Backups/garmin-monitor:/backups   # nightly DB copies (backup_dir)
+      - /volume1/James/Obsidian/Garmin:/vault            # movement log + AI memory (vault_dir)
     mem_limit: 768m        # python ~150 MB + one claude -p call at a time

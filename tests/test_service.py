@@ -349,7 +349,7 @@ def test_poll_logs_episodes_to_obsidian_vault(svc, tmp_path):
     text = note.read_text(encoding="utf-8")
     assert "| Time | Duration | Peak HR |" in text and "at rest" in text
     home = (tmp_path / "vault" / "Home.md").read_text(encoding="utf-8")
-    assert f"[[{DAY.isoformat()}]]" in home
+    assert f"[[Episodes/{DAY.isoformat()}|{DAY.isoformat()}]]" in home
     service.poll(profile)  # re-run rewrites, never duplicates
     assert note.read_text(encoding="utf-8").count("| at rest |") == text.count("| at rest |")
 

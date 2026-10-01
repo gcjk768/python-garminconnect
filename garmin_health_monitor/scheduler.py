@@ -17,7 +17,7 @@ from . import messages
 from .config import AppConfig, ProfileConfig
 from .models import Alert, Episode
 from .service import MonitorService, PollResult
-from .utils import get_tz, parse_hhmm
+from .utils import get_tz, parse_hhmm, to_local
 
 if TYPE_CHECKING:
     from .telegram_bot import HealthBot
@@ -138,6 +138,7 @@ class Scheduler:
         text = await asyncio.to_thread(self.service.workout_nudge_text, p)
         if text:
             await self.bot.send_text(p.telegram_chat_ids, text, None, p)
+            self.service.log_event(p, "🏃", "Workout nudge sent")
 
     async def job_backup(self, context: ContextTypes.DEFAULT_TYPE) -> None:
         try:
@@ -168,6 +169,7 @@ class Scheduler:
         try:
             text = await asyncio.to_thread(fn, p)
             await self.bot.send_text(p.telegram_chat_ids, text)
+            self.service.log_event(p, "📨", f"{label.capitalize()} sent")
         except Exception as exc:  # noqa: BLE001
             logger.exception("%s: %s failed", p.name, label)
             await self._notify_admins(messages.problem(f"{label.capitalize()} failed", p.name, exc))
@@ -194,12 +196,16 @@ class Scheduler:
         await self.bot.notify_episode(p, ep, text, png)
         if ep.id is not None:
             self.service.storage.mark_episode_notified(ep.id)
+        start = to_local(ep.start, p.timezone or self.config.timezone)
+        self.service.log_event(p, "🚨", "Episode alert sent", f"{start:%H:%M}, peak {ep.peak_hr} bpm",
+                               f"Episodes/{start.date().isoformat()}")
 
     async def notify_alert(self, p: ProfileConfig, alert: Alert) -> None:
         if self.service.storage.notification_sent(alert.key):
             return
         await self.bot.send_text(p.telegram_chat_ids, messages.alert_message(alert))
         self.service.storage.mark_notification(alert.key, p.name)
+        self.service.log_event(p, "⚠️", "Alert sent", f"{alert.severity}: {alert.title}")
 
     @staticmethod
     def _is_critical_episode(p: ProfileConfig, ep: Episode) -> bool:
@@ -214,6 +220,7 @@ class Scheduler:
             return
         self._down_alerted.add(p.name)
         hours = (now - since).total_seconds() / 3600
+        self.service.log_event(p, "🔌", "Garmin down", f"no data for {hours:.0f}h, alerts paused: {error[:120]}")
         tz = p.timezone or self.config.timezone
         if "login" in error.lower():
             why = "🔑 Garmin login is failing. If this lasts, run <code>garmin-monitor login</code> for this profile."
@@ -239,6 +246,7 @@ class Scheduler:
             day += timedelta(days=1)
         if p.name in self._down_alerted:
             self._down_alerted.discard(p.name)
+            self.service.log_event(p, "✅", "Garmin back", "missed days re-checked")
             await self._notify_admins(f"✅ <b>Garmin data is back</b> · {messages.esc(p.name)}\n\n▶️ Nothing lost; missed episodes are checked now.")
 
     async def _notify_admins(self, text: str) -> None:
