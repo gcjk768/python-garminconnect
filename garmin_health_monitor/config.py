@@ -143,6 +143,9 @@ class TelegramConfig:
     admin_chat_ids: list[int] = field(default_factory=list)
     admin_threads: dict[int, int] = field(default_factory=dict)  # chat_id -> forum topic id
     parse_mode: str = "HTML"
+    # Added to every menu command (e.g. "dad_" -> /dad_today) so bots sharing one group
+    # don't list the same names; the plain names keep working.
+    command_prefix: str = ""
 
 
 @dataclass(slots=True)
@@ -402,7 +405,10 @@ def parse_config(raw: dict[str, Any]) -> AppConfig:
         admin_chat_ids=admin_ids,
         admin_threads=admin_threads,
         parse_mode=str(tg_raw.get("parse_mode") or "HTML"),
+        command_prefix=str(tg_raw.get("command_prefix") or ""),
     )
+    if not re.fullmatch(r"[a-z0-9_]{0,12}", telegram.command_prefix):
+        raise ConfigError("telegram.command_prefix: use up to 12 of a-z, 0-9 and _")
 
     ollama = _dataclass_from(OllamaConfig, raw.get("ollama") or {}, "ollama")
     ollama.enabled = _as_bool(ollama.enabled, True)

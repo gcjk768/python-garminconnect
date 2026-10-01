@@ -5,6 +5,7 @@ updated: 2026-10-01
 # Changelog
 
 ## 2026-10-01
+- feat: `telegram.command_prefix` in config.yaml (garmin-monitor `g_`, dad-heart-monitor `dad_`): the menu lists `/g_today`, `/dad_today`…; plain names still work. James Channel shows every bot's commands in one `/` menu (no per-topic scope in Telegram), so names must be unique across bots. `_names` + `_post_init` in `garmin_health_monitor/telegram_bot.py`, validated in `config.py`.
 - fix: in a forum group each bot answers only in its own topic (`_authorised_chat` in `garmin_health_monitor/telegram_bot.py` checks `message_thread_id` against `thread_for`). /ask in the SG car topic made both James and Dad bots reply "I don't know that command".
 
 ## 2026-09-30 — README + architecture diagram

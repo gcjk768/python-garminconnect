@@ -887,3 +887,13 @@ async def test_forum_bot_ignores_other_topics(tmp_path, service):
     own.effective_message.message_thread_id = 77
     await hb.cmd_unknown(own, make_context())
     assert replies(own)
+
+
+def test_command_prefix_adds_prefixed_names_and_keeps_plain(tmp_path, service):
+    cfg = make_app_config(tmp_path)
+    cfg.telegram.command_prefix = "dad_"
+    names = set()
+    for handlers in HealthBot(cfg, service).app.handlers.values():
+        for h in handlers:
+            names |= set(getattr(h, "commands", ()))
+    assert {"today", "dad_today", "status", "dad_status"} <= names

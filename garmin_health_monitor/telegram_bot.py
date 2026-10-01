@@ -339,32 +339,38 @@ class HealthBot:
 
     def _register_handlers(self) -> None:
         app = self.app
-        app.add_handler(CommandHandler("start", self.cmd_start))
-        app.add_handler(CommandHandler("help", self.cmd_help))
-        app.add_handler(CommandHandler("profiles", self.cmd_profiles))
-        app.add_handler(CommandHandler("today", self.cmd_today))
-        app.add_handler(CommandHandler("yesterday", self.cmd_yesterday))
-        app.add_handler(CommandHandler("sleep", self.cmd_sleep))
-        app.add_handler(CommandHandler("steps", self.cmd_steps))
-        app.add_handler(CommandHandler("hr", self.cmd_hr))
-        app.add_handler(CommandHandler("episodes", self.cmd_episodes))
-        app.add_handler(CommandHandler("palp", self.cmd_palp))
-        app.add_handler(CommandHandler("note", self.cmd_note))
-        app.add_handler(CommandHandler("report", self.cmd_report))
-        app.add_handler(CommandHandler("analyze", self.cmd_analyze))
-        app.add_handler(CommandHandler("analyse", self.cmd_analyze))
-        app.add_handler(CommandHandler("status", self.cmd_status))
-        app.add_handler(CommandHandler("mfa", self.cmd_mfa))
+        app.add_handler(CommandHandler(self._names("start"), self.cmd_start))
+        app.add_handler(CommandHandler(self._names("help"), self.cmd_help))
+        app.add_handler(CommandHandler(self._names("profiles"), self.cmd_profiles))
+        app.add_handler(CommandHandler(self._names("today"), self.cmd_today))
+        app.add_handler(CommandHandler(self._names("yesterday"), self.cmd_yesterday))
+        app.add_handler(CommandHandler(self._names("sleep"), self.cmd_sleep))
+        app.add_handler(CommandHandler(self._names("steps"), self.cmd_steps))
+        app.add_handler(CommandHandler(self._names("hr"), self.cmd_hr))
+        app.add_handler(CommandHandler(self._names("episodes"), self.cmd_episodes))
+        app.add_handler(CommandHandler(self._names("palp"), self.cmd_palp))
+        app.add_handler(CommandHandler(self._names("note"), self.cmd_note))
+        app.add_handler(CommandHandler(self._names("report"), self.cmd_report))
+        app.add_handler(CommandHandler(self._names("analyze"), self.cmd_analyze))
+        app.add_handler(CommandHandler(self._names("analyse"), self.cmd_analyze))
+        app.add_handler(CommandHandler(self._names("status"), self.cmd_status))
+        app.add_handler(CommandHandler(self._names("mfa"), self.cmd_mfa))
         app.add_handler(CallbackQueryHandler(self.cb_felt, pattern=FELT_CALLBACK_RE))
         app.add_handler(CallbackQueryHandler(self.cb_med, pattern=MED_CALLBACK_RE))
         app.add_handler(MessageHandler(filters.COMMAND, self.cmd_unknown))
         app.add_error_handler(self.on_error)
 
+    def _names(self, name: str) -> list[str]:
+        """The plain command name, plus the prefixed one the menu shows."""
+        prefix = self.config.telegram.command_prefix
+        return [name, prefix + name] if prefix else [name]
+
     async def _post_init(self, app: Application) -> None:
         """Runs inside ``run_polling`` once the application is initialised."""
         self.loop = asyncio.get_running_loop()
         try:
-            await app.bot.set_my_commands([BotCommand(c, d) for c, d in _BOT_COMMANDS])
+            prefix = self.config.telegram.command_prefix
+            await app.bot.set_my_commands([BotCommand(prefix + c, d) for c, d in _BOT_COMMANDS])
         except TelegramError as exc:
             logger.warning("Could not publish the command menu: %s", exc)
 

@@ -15,4 +15,5 @@ Telegram bot + scheduler on the NAS that pulls Garmin data for the family, detec
 - Output format: `garmin_health_monitor/messages.py::_compact` hides n/a; `coaching_block` is the short card.
 - Dad: NAS stack `dad-heart-monitor` (config in its `config/config.yaml`, heart-only features); vault log via `garmin_health_monitor/vault.py`.
 - Docs: `README.md` (public overview) and `docs/architecture.drawio` (diagram source; export to `docs/architecture.drawio.svg`).
+- Command prefix: `telegram.command_prefix` ([garmin_health_monitor/config.py](../../garmin_health_monitor/config.py)) prefixes every menu command so the two stacks (and other bots) don't share names in James Channel.
 - Topic filter: [garmin_health_monitor/telegram_bot.py](../../garmin_health_monitor/telegram_bot.py) `_authorised_chat` ignores messages from other forum topics (the profile's `telegram_threads`), so shared-group commands only reach the bot whose topic they were sent in.
