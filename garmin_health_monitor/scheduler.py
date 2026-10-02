@@ -198,14 +198,15 @@ class Scheduler:
             self.service.storage.mark_episode_notified(ep.id)
         start = to_local(ep.start, p.timezone or self.config.timezone)
         self.service.log_event(p, "🚨", "Episode alert sent", f"{start:%H:%M}, peak {ep.peak_hr} bpm",
-                               f"Episodes/{start.date().isoformat()}")
+                               [f"Episodes/{start.date().isoformat()}", "Alerts/episode"])
 
     async def notify_alert(self, p: ProfileConfig, alert: Alert) -> None:
         if self.service.storage.notification_sent(alert.key):
             return
         await self.bot.send_text(p.telegram_chat_ids, messages.alert_message(alert))
         self.service.storage.mark_notification(alert.key, p.name)
-        self.service.log_event(p, "⚠️", "Alert sent", f"{alert.severity}: {alert.title}")
+        self.service.log_event(p, "⚠️", "Alert sent", f"{alert.severity}: {alert.title}",
+                               f"Alerts/{alert.key.split(':', 1)[0]}")
 
     @staticmethod
     def _is_critical_episode(p: ProfileConfig, ep: Episode) -> bool:
@@ -220,7 +221,8 @@ class Scheduler:
             return
         self._down_alerted.add(p.name)
         hours = (now - since).total_seconds() / 3600
-        self.service.log_event(p, "🔌", "Garmin down", f"no data for {hours:.0f}h, alerts paused: {error[:120]}")
+        self.service.log_event(p, "🔌", "Garmin down", f"no data for {hours:.0f}h, alerts paused: {error[:120]}",
+                               "Alerts/garmin_down")
         tz = p.timezone or self.config.timezone
         if "login" in error.lower():
             why = "🔑 Garmin login is failing. If this lasts, run <code>garmin-monitor login</code> for this profile."

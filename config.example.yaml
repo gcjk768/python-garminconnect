@@ -5,7 +5,7 @@
 timezone: ${TZ:-Asia/Singapore}     # default zone for schedules and message times
 data_dir: /data                     # tokens, database, generated reports live here
 database: /data/monitor.db
-# Obsidian vault (movement log + AI memory): Activity/, Episodes/, Days/, Home.md.
+# Obsidian vault (movement log + AI memory): Activity/YYYY/MM/, Episodes/, Days/, Metrics/, Alerts/, Home.md.
 # Mount /volume1/James/Obsidian/<App Name> at /vault. Omit to turn the vault off.
 vault_dir: /vault
 log_level: INFO

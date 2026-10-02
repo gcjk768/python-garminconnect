@@ -3,10 +3,13 @@
 Layout under ``vault_dir`` (flat, at most two levels):
 
 * ``Home.md``: map of contents, rebuilt on every note write.
-* ``Activity/YYYY-MM-DD.md``: append-only, one line per event,
+* ``Activity/YYYY/MM/YYYY-MM-DD.md``: append-only, one line per event,
   ``- HH:MM emoji **what** · detail · [[entity]]`` (local time, SGT on the NAS).
+  Old flat ``Activity/YYYY-MM-DD.md`` notes are moved into ``YYYY/MM/`` by :func:`migrate`.
 * ``Episodes/YYYY-MM-DD.md``: possible palpitations that day (table rebuilt from the database).
 * ``Days/YYYY-MM-DD.md``: the day's numbers and coaching (profiles with coaching).
+* ``Metrics/<metric>.md``: one note per metric (resting HR, HRV, sleep, stress...), one History
+  line per day. ``Alerts/<type>.md``: one note per alert type, every send in its History.
 
 Entity notes end with an append-only ``## History`` section that survives every rewrite.
 :func:`memory` reads it all back as a capped, newest-first excerpt for the LLM prompts.
@@ -32,7 +35,8 @@ logger = logging.getLogger(__name__)
 
 MEMORY_CHARS = 4000  # cap on the excerpt passed to the LLM
 RECENT_NOTES = 14  # newest Activity / entity notes read for memory
-ENTITY_DIRS = ("Episodes", "Days")
+ENTITY_DIRS = ("Episodes", "Days")  # date-named notes read back as memory
+NAMED_DIRS = ("Alerts", "Metrics")  # one note per alert type / metric
 HISTORY = "## History"
 _COUNT_RE = re.compile(r"^episodes: (\d+)$", re.MULTILINE)
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -54,13 +58,21 @@ def _write(path: Path, text: str) -> None:
     os.replace(tmp, path)
 
 
+def _split(path: Path) -> tuple[str, list[str]]:
+    """A note as (text above ``## History`` without frontmatter, History lines)."""
+    if not path.exists():
+        return "", []
+    text = path.read_text(encoding="utf-8")
+    if text.startswith("---"):
+        end = text.find("\n---", 3)
+        text = text[end + 4:] if end >= 0 else text
+    head, _, past = text.partition("\n" + HISTORY)
+    return head.strip("\n"), [ln for ln in past.splitlines() if ln.strip()]
+
+
 def _history(path: Path) -> list[str]:
     """The existing ``## History`` lines of a note (kept across rewrites)."""
-    if not path.exists():
-        return []
-    text = path.read_text(encoding="utf-8")
-    i = text.find("\n" + HISTORY)
-    return [ln for ln in text[i + len(HISTORY) + 1:].splitlines() if ln.strip()] if i >= 0 else []
+    return _split(path)[1]
 
 
 def _with_history(path: Path, lines: list[str]) -> str:
@@ -70,21 +82,70 @@ def _with_history(path: Path, lines: list[str]) -> str:
 # --------------------------------------------------------------------- write
 
 
+def _activity_path(root: Path, day: date) -> Path:
+    return root / "Activity" / f"{day:%Y}" / f"{day:%m}" / f"{day.isoformat()}.md"
+
+
+def migrate(vault_dir: str | None) -> list[str]:
+    """Move old flat ``Activity/YYYY-MM-DD.md`` notes into ``Activity/YYYY/MM/`` (never deletes)."""
+    moved: list[str] = []
+    if not vault_dir:
+        return moved
+    try:
+        root = Path(vault_dir)
+        for old in sorted((root / "Activity").glob("*.md")):
+            if not _DATE_RE.match(old.stem):
+                continue
+            new = _activity_path(root, date.fromisoformat(old.stem))
+            if new.exists():
+                continue
+            new.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(old, new)
+            moved.append(old.stem)
+        if moved:
+            logger.info("vault: moved %d Activity notes into YYYY/MM folders", len(moved))
+            write_index(root, date.today())
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("vault migrate failed: %s", exc)
+    return moved
+
+
+def history(vault_dir: str | None, entity: str, line: str, today: date, replace: str | None = None) -> None:
+    """Add ``line`` to ``<entity>.md``'s ``## History`` (note created if missing; text above History
+    kept verbatim; atomic write). ``replace``: an existing line with that prefix is replaced, so a
+    re-run for the same day never duplicates a reading."""
+    if not vault_dir:
+        return
+    try:
+        path = Path(vault_dir) / f"{entity}.md"
+        head, past = _split(path)
+        if replace:
+            past = [ln for ln in past if not ln.startswith(replace)]
+        new = not head
+        head = head or f"# {Path(entity).name}"
+        _write(path, f"---\ntags: [active]\nupdated: {today.isoformat()}\n---\n{head}\n\n{HISTORY}\n"
+                     + "".join(f"{ln}\n" for ln in [*past, line]))
+        if new:
+            write_index(Path(vault_dir), today)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("vault history %s failed: %s", entity, exc)
+
+
 def log(vault_dir: str | None, when: datetime, emoji: str, what: str, detail: str = "",
-        entity: str = "") -> None:
-    """Append one event to ``Activity/<day>.md`` (and to the entity note's History)."""
+        entity: str | Sequence[str] = "") -> None:
+    """Append one event to ``Activity/YYYY/MM/<day>.md`` (and to each entity note's History)."""
     if not vault_dir:
         return
     try:
         root = Path(vault_dir)
         day = when.date().isoformat()
+        entities = [entity] if isinstance(entity, str) else list(entity)
         parts = [f"- {when:%H:%M} {emoji} **{_clean(what, 60)}**"]
         if detail:
             parts.append(_clean(detail))
-        if entity:
-            parts.append(f"[[{entity}]]")
+        parts += [f"[[{e}]]" for e in entities if e]
         line = " · ".join(parts)
-        path = root / "Activity" / f"{day}.md"
+        path = _activity_path(root, when.date())
         new = not path.exists()
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as fh:
@@ -95,14 +156,9 @@ def log(vault_dir: str | None, when: datetime, emoji: str, what: str, detail: st
             with contextlib.suppress(OSError):
                 os.chmod(path, 0o664)
             write_index(root, when.date())
-        if entity:
-            note = root / f"{entity}.md"
-            if note.exists():
-                has_history = ("\n" + HISTORY) in note.read_text(encoding="utf-8")
-                with note.open("a", encoding="utf-8") as fh:
-                    fh.write(line + "\n" if has_history else f"\n{HISTORY}\n{line}\n")
-            else:
-                _write(note, f"---\ntags: [active]\nupdated: {day}\n---\n# {Path(entity).name}\n\n{HISTORY}\n{line}\n")
+        for e in entities:
+            if e:
+                history(vault_dir, e, line, when.date())
     except Exception as exc:  # noqa: BLE001 - the vault is best-effort
         logger.warning("vault log failed: %s", exc)
 
@@ -164,22 +220,36 @@ def write_note(vault_dir: str | None, folder: str, day: date, title: str, body: 
         logger.warning("vault %s note failed: %s", folder, exc)
 
 
+def _notes(root: Path, folder: str) -> list[Path]:
+    """Date-named notes under ``folder`` (any depth), newest first."""
+    return sorted((p for p in (root / folder).rglob("*.md") if _DATE_RE.match(p.stem)),
+                  key=lambda p: p.stem, reverse=True)
+
+
 def _stems(root: Path, folder: str) -> list[str]:
-    return sorted((p.stem for p in (root / folder).glob("*.md") if _DATE_RE.match(p.stem)), reverse=True)
+    return [p.stem for p in _notes(root, folder)]
+
+
+def _link(root: Path, path: Path) -> str:
+    return f"[[{path.relative_to(root).with_suffix('').as_posix()}|{path.stem}]]"
 
 
 def write_index(root: Path, today: date) -> None:
-    """``Home.md`` (MOC): latest activity and days, episodes by month, other notes."""
+    """``Home.md`` (MOC): this month's Activity folder, latest activity and days, episodes by
+    month, alerts, metrics, other notes."""
     lines = [
         "---", "tags: [active]", f"updated: {today.isoformat()}", "---",
         "# Garmin health monitor",
         "",
-        "Written automatically by the Garmin monitor: `Activity/` is the movement log (one line per "
-        "event), `Episodes/` the possible palpitations per day, `Days/` the daily numbers and coaching. "
+        "Written automatically by the Garmin monitor: `Activity/YYYY/MM/` is the movement log (one note "
+        "per day, one line per event), `Episodes/` the possible palpitations per day, `Days/` the daily "
+        "numbers and coaching, `Metrics/` one note per metric, `Alerts/` one note per alert type. "
         "Recent notes are read back into the AI prompts as memory.",
+        "",
+        f"This month: `Activity/{today:%Y/%m}/`",
     ]
-    if acts := _stems(root, "Activity")[:14]:
-        lines += ["", "## Latest activity", *(f"- [[Activity/{s}|{s}]]" for s in acts)]
+    if acts := _notes(root, "Activity")[:14]:
+        lines += ["", "## Latest activity", *(f"- {_link(root, p)}" for p in acts)]
     if days := _stems(root, "Days")[:14]:
         lines += ["", "## Days", *(f"- [[Days/{s}|{s}]]" for s in days)]
     month = None
@@ -192,6 +262,9 @@ def write_index(root: Path, today: date) -> None:
             month = s[:7]
             lines += ["", f"## Episodes · {date.fromisoformat(s):%B %Y}"]
         lines.append(f"- [[Episodes/{s}|{s}]]: {count}")
+    for folder in NAMED_DIRS:
+        if named := sorted((root / folder).glob("*.md")):
+            lines += ["", f"## {folder}", *(f"- {_link(root, p)}" for p in named)]
     if other := sorted(p.stem for p in root.glob("*.md") if p.name != "Home.md"):
         lines += ["", "## Other notes", *(f"- [[{s}]]" for s in other)]
     _write(root / "Home.md", "\n".join(lines) + "\n")
@@ -231,8 +304,8 @@ def memory(vault_dir: str | None, cap: int = MEMORY_CHARS) -> str:
         return ""
     try:
         root = Path(vault_dir)
-        acts = [f"- {s} {ln[2:]}" for s in _stems(root, "Activity")[:RECENT_NOTES]
-                for ln in reversed((root / "Activity" / f"{s}.md").read_text(encoding="utf-8").splitlines())
+        acts = [f"- {p.stem} {ln[2:]}" for p in _notes(root, "Activity")[:RECENT_NOTES]
+                for ln in reversed(p.read_text(encoding="utf-8").splitlines())
                 if ln.startswith("- ")]
         out = _take(["Recent activity (newest first):", *acts] if acts else [], cap // 2)
         notes = sorted(((s, d) for d in ENTITY_DIRS for s in _stems(root, d)), reverse=True)[:RECENT_NOTES]

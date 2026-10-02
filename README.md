@@ -35,7 +35,7 @@ An older family member wears a Garmin watch and reports occasional heart palpita
 5. **Assess** — `analysis.py` asks the LLM for a plain-language view of each new episode and for daily/weekly coaching.
 6. **Render** — `messages.py`, `charts.py` (matplotlib) and `report.py` build Telegram HTML, PNG charts and the doctor PDF/CSV.
 7. **Send** — `telegram_bot.py` delivers alerts (with "I felt it / didn't notice" buttons), holds non-critical ones during quiet hours, and answers commands.
-8. **Keep** — nightly DB backup to a NAS share; `vault.py` keeps an Obsidian vault (movement log, episode and day notes) and feeds a capped recent excerpt back into the AI prompts as memory.
+8. **Keep** — nightly DB backup to a NAS share; `vault.py` keeps an Obsidian vault (movement log by year/month, episode, day, metric and alert notes) and feeds a capped recent excerpt back into the AI prompts as memory.
 
 Two NAS stacks run the same image with different config: `garmin-monitor` (personal fitness: briefs, weekly review, workout nudge) and `dad-heart-monitor` (heart-only: episode alerts, nightly heart review, medicine reminder, safety alerts).
 

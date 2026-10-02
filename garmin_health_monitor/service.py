@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import threading
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
@@ -49,6 +49,9 @@ class PollResult:
     error: str | None = None
 
 
+METRIC_KEYS = ("resting_hr", "hrv", "sleep_h", "sleep_score", "stress_avg", "steps")  # Metrics/<key>.md
+
+
 class MonitorService:
     def __init__(
         self,
@@ -70,6 +73,7 @@ class MonitorService:
         self.clock = clock
         self.started_at = clock()
         self.reports_dir = Path(config.data_dir) / "reports"
+        vault.migrate(config.vault_dir)  # old flat Activity notes -> Activity/YYYY/MM/
 
     # ------------------------------------------------------------------ helpers
 
@@ -223,7 +227,8 @@ class MonitorService:
         except Exception as exc:  # noqa: BLE001 - the vault never breaks monitoring
             logger.warning("%s: vault write failed: %s", profile.name, exc)
 
-    def log_event(self, profile: ProfileConfig | None, emoji: str, what: str, detail: str = "", entity: str = "") -> None:
+    def log_event(self, profile: ProfileConfig | None, emoji: str, what: str, detail: str = "",
+                  entity: str | Sequence[str] = "") -> None:
         """One line in today's vault Activity note (no-op without ``vault_dir``; never raises)."""
         tz = (profile.timezone if profile else None) or self.config.timezone
         vault.log(self.config.vault_dir, to_local(self.clock(), tz), emoji, what, detail, entity)
@@ -364,6 +369,10 @@ class MonitorService:
                 *(f"- Do more: {x}" for x in advice.do_more), *(f"- Do less: {x}" for x in advice.do_less),
                 *(f"- Watch: {x}" for x in advice.watch_outs)]
         vault.write_note(self.config.vault_dir, "Days", snap.day, f"{snap.day:%a %d %b %Y} ({profile.name})", body, self.today(profile))
+        for key in METRIC_KEYS:  # Metrics/<metric>.md: one History line per day; a re-run replaces that day
+            if day.get(key) is not None:
+                vault.history(self.config.vault_dir, f"Metrics/{key}", f"- {snap.day} {day[key]} · [[Days/{snap.day}]]",
+                              self.today(profile), replace=f"- {snap.day} ")
         self.log_event(profile, "🏋️", "Coaching", advice.summary, f"Days/{snap.day.isoformat()}")
 
     def stored_coaching(self, profile: ProfileConfig, day: date) -> CoachingAdvice | None:

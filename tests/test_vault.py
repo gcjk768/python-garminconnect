@@ -23,7 +23,7 @@ def test_activity_line_format_and_entity_history(tmp_path):
     vault.log(str(root), at(DAY, 14, 5), "💓", "Possible palpitation",
               "14:02–14:20, peak 132 bpm\nsecond line [[x]]", f"Episodes/{DAY}")
     vault.log(str(root), at(DAY, 14, 6), "🚨", "Episode alert sent")
-    text = (root / "Activity" / f"{DAY}.md").read_text(encoding="utf-8")
+    text = (root / "Activity" / "2026" / "09" / f"{DAY}.md").read_text(encoding="utf-8")
     lines = [ln for ln in text.splitlines() if ln.startswith("- ")]
     assert lines == [
         f"- 14:05 💓 **Possible palpitation** · 14:02–14:20, peak 132 bpm second line [x] · [[Episodes/{DAY}]]",
@@ -33,7 +33,35 @@ def test_activity_line_format_and_entity_history(tmp_path):
     assert text.startswith("---\ntags: [activity]\n")
     note = (root / "Episodes" / f"{DAY}.md").read_text(encoding="utf-8")
     assert note.rstrip().endswith(lines[0]) and "## History" in note
-    assert f"[[Activity/{DAY}|{DAY}]]" in (root / "Home.md").read_text(encoding="utf-8")
+    home = (root / "Home.md").read_text(encoding="utf-8")
+    assert f"[[Activity/2026/09/{DAY}|{DAY}]]" in home and "This month: `Activity/2026/09/`" in home
+
+
+def test_flat_activity_notes_migrate_and_named_entities_keep_history(tmp_path):
+    root = tmp_path / "v"
+    (root / "Activity").mkdir(parents=True)
+    (root / "Activity" / "2026-08-30.md").write_text("# old\n- 08:00 x **y**\n", encoding="utf-8")
+    (root / "Activity" / "README.md").write_text("James's own note stays", encoding="utf-8")
+    assert vault.migrate(str(root)) == ["2026-08-30"]
+    assert (root / "Activity" / "2026" / "08" / "2026-08-30.md").exists()
+    assert not (root / "Activity" / "2026-08-30.md").exists() and (root / "Activity" / "README.md").exists()
+    assert vault.migrate(str(root)) == [] and vault.migrate(None) == []
+    # one Activity line can feed several entity notes (Episodes + Alerts)
+    vault.log(str(root), at(DAY, 9), "🚨", "Episode alert sent", "peak 132", [f"Episodes/{DAY}", "Alerts/episode"])
+    alerts = (root / "Alerts" / "episode.md").read_text(encoding="utf-8")
+    assert alerts.startswith("---\ntags: [active]\n") and "# episode\n\n## History\n- 09:00 🚨" in alerts
+    assert "## History\n- 09:00 🚨" in (root / "Episodes" / f"{DAY}.md").read_text(encoding="utf-8")
+    # Metrics: one line per day, a re-run replaces that day's line, James's text above History stays
+    vault.history(str(root), "Metrics/resting_hr", f"- {DAY} 52", DAY, replace=f"- {DAY} ")
+    note = root / "Metrics" / "resting_hr.md"
+    note.write_text(note.read_text(encoding="utf-8").replace("# resting_hr", "# resting_hr\nMy note."), encoding="utf-8")
+    vault.history(str(root), "Metrics/resting_hr", f"- {DAY} 54", DAY, replace=f"- {DAY} ")
+    vault.history(str(root), "Metrics/resting_hr", f"- {DAY + timedelta(days=1)} 50", DAY)
+    text = note.read_text(encoding="utf-8")
+    assert text.endswith(f"# resting_hr\nMy note.\n\n## History\n- {DAY} 54\n- {DAY + timedelta(days=1)} 50\n")
+    assert "- 2026-08-30 08:00 x **y**" in vault.memory(str(root))  # migrated notes still count as memory
+    home = (root / "Home.md").read_text(encoding="utf-8")
+    assert "[[Alerts/episode|episode]]" in home and "[[Metrics/resting_hr|resting_hr]]" in home
 
 
 def test_entity_rewrite_keeps_history(tmp_path):
@@ -95,7 +123,7 @@ def test_memory_reaches_episode_and_coaching_prompts(svc, tmp_path):  # noqa: F8
     assert all("MARKER-YESTERDAY" in u for u in prompts)
     # the second assessment already sees the first one's Activity line
     assert any("**AI view**" in u for u in prompts[1:])
-    activity = (root / "Activity" / f"{DAY}.md").read_text(encoding="utf-8")
+    activity = (root / "Activity" / "2026" / "09" / f"{DAY}.md").read_text(encoding="utf-8")
     assert "**Possible palpitation**" in activity and "**AI view**" in activity
 
     service.llm.calls.clear()
@@ -103,3 +131,5 @@ def test_memory_reaches_episode_and_coaching_prompts(svc, tmp_path):  # noqa: F8
     coaching = [u for _, u in service.llm.calls if "do_more" in u]
     assert coaching and "**Possible palpitation**" in coaching[0]
     assert "## Coaching (fake-model)" in (root / "Days" / f"{DAY}.md").read_text(encoding="utf-8")
+    metrics = list((root / "Metrics").glob("*.md"))
+    assert metrics and all(f"- {DAY} " in m.read_text(encoding="utf-8") for m in metrics)

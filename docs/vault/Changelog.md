@@ -4,6 +4,13 @@ updated: 2026-10-02
 ---
 # Changelog
 
+## 2026-10-02 — Vault by year/month + Metrics/Alerts notes
+- feat: Activity notes live in `Activity/YYYY/MM/YYYY-MM-DD.md`; `vault.migrate()` (called in `MonitorService.__init__`) moves old flat `Activity/YYYY-MM-DD.md` notes into `YYYY/MM/` (never deletes, skips non-date notes). `Home.md` names the current month folder; links are path-qualified (`[[Activity/2026/10/2026-10-02|2026-10-02]]`). Memory reads the nested layout.
+- feat: `Metrics/<metric>.md` (resting_hr, hrv, sleep_h, sleep_score, stress_avg, steps; `METRIC_KEYS` in `service.py`): `_log_day` adds one `## History` line per day (`- YYYY-MM-DD value · [[Days/...]]`); a re-run replaces that day's line (`vault.history(..., replace=)`), text above History is kept verbatim.
+- feat: `Alerts/<type>.md`: episode alerts (`Alerts/episode`), rule alerts (`Alerts/<rule key>`, e.g. `rhr_high`) and `Alerts/garmin_down` get every send in their History. `vault.log(entity=)` accepts several entities (one Activity line, several `[[links]]`).
+- chore: both NAS stacks already ran the 2026-10-02 vault commit (code identical to git); no NAS-only edits to fold in. Vault folders stay `/volume1/James/Obsidian/Garmin` and `/volume1/James/Obsidian/Dad Heart` (already in use, Dad's September backfill lives there).
+- Tests: `tests/test_vault.py::test_flat_activity_notes_migrate_and_named_entities_keep_history`.
+
 ## 2026-10-02 — Vault movement log + memory (NAS app-vault standard)
 - feat: `garmin_health_monitor/vault.py` now follows the standard: `Activity/YYYY-MM-DD.md` gets one line per event (`- HH:MM emoji **what** · detail · [[entity]]`, SGT); entity notes `Episodes/` (palpitation table, rebuilt from the DB) and new `Days/` (daily numbers + coaching) keep an append-only `## History` that survives rewrites; `Home.md` is a MOC (latest activity, days, episodes by month, other notes such as Medication). Atomic writes, chmod 664.
 - Events logged (`MonitorService.log_event`, `Scheduler`): possible palpitation found, AI view (and failures), episode alert / rule alert sent, coaching, weekly review, monthly report, symptom logged (red flag marked), medicine taken, scheduled report / workout nudge sent, Garmin down / back.
